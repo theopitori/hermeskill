@@ -42,10 +42,11 @@ def create_app() -> FastAPI:
     app.include_router(agents_router.router)
     app.include_router(heartbeats_router.router)
     app.include_router(events_router.router)
-    # M2.5 — kill_events has both nested (POST/list under /agents/{id})
-    # and top-level (GET single by id) routers.
+    # M2.5 — kill_events has nested (POST/list under /agents/{id}),
+    # top-level (GET single by id), and the M4 /kills/* batch router.
     app.include_router(kill_events_router.router)
     app.include_router(kill_events_router.top_router)
+    app.include_router(kill_events_router.kills_router)
     # M3 — unauthenticated one-click feedback. Mounted last so its routes
     # are unambiguous even though the prefix doesn't collide.
     app.include_router(feedback_router.router)

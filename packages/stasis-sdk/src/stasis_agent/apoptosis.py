@@ -265,17 +265,32 @@ def build_death_certificate(
     now = terminated_at or datetime.now(UTC)
     triggered_at = state.terminate_requested_at or now
     reason = state.terminate_reason or "unknown"
+
+    # M4: branch on `state.manual_kill` rather than `terminate_reason`.
+    # The poller writes the dict atomically with the flag flip, so its
+    # presence is the authoritative signal that this kill was operator-
+    # issued.
+    manual = state.manual_kill
+    if manual is not None:
+        trigger_type = TriggerType.MANUAL
+        operator = manual.get("operator")
+        operator_reason = manual.get("operator_reason")
+    else:
+        trigger_type = TriggerType.AUTO
+        operator = None
+        operator_reason = None
+
     return DeathCertificate(
         agent_id=state.agent_id,
         triggered_at=triggered_at,
         terminated_at=now,
-        trigger_type=TriggerType.AUTO,
+        trigger_type=trigger_type,
         trigger_reason=reason,
         symptoms_log=list(state.symptoms_log),
         final_state={},  # v2 / cleanup-hook hookpoint
         shutdown_log=[_normalize_step(s) for s in state.shutdown_log],
-        operator=None,
-        operator_reason=None,
+        operator=operator,
+        operator_reason=operator_reason,
     )
 
 

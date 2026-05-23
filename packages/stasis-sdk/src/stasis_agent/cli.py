@@ -1,13 +1,13 @@
 """`stasis` CLI entry point (Typer + Rich).
 
-Commands so far (M1):
+Commands so far:
 
     stasis fleet
     stasis logs <agent_id> [--follow] [--limit N]
+    stasis kill <agent_id> --reason "..."        # M4
 
 Commands stubbed for later milestones:
 
-    stasis kill <agent_id> --reason "..."        # M4
     stasis grant <agent_id> --symptoms ...       # M5
     stasis revoke <grant_id> --reason "..."      # M5
 """
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 
 import typer
 from rich.console import Console
@@ -24,11 +25,13 @@ from rich.table import Table
 from stasis_agent._version import __version__
 from stasis_agent.client import (
     AuthError,
+    ConflictError,
     NotFoundError,
     StasisClient,
     TransportError,
 )
-from stasis_agent.types import AgentSummary, EventOut, EventType
+from stasis_agent.policies import UnknownPolicyError, resolve_policy
+from stasis_agent.types import AgentStatus, AgentSummary, EventOut, EventType
 
 app = typer.Typer(
     name="stasis",
@@ -198,13 +201,153 @@ def _print_event(ev: EventOut) -> None:
 
 @app.command()
 def kill(
-    agent_id: str = typer.Argument(...),
-    reason: str = typer.Option(..., "--reason"),
+    agent_id: str = typer.Argument(..., help="Agent UUID. See `stasis fleet`."),
+    reason: str = typer.Option(
+        ..., "--reason", help="Operator justification. Persisted on the death cert."
+    ),
+    poll_interval: float = typer.Option(
+        0.5,
+        "--poll-interval",
+        help="How often (s) the CLI polls for kill progress. CLI-side only.",
+        min=0.1,
+        max=10.0,
+    ),
 ) -> None:
-    """Manually terminate an agent (M4)."""
-    _ = reason
-    typer.echo(f"kill {agent_id}: not yet implemented (lands in M4)", err=True)
-    raise typer.Exit(1)
+    """Manually terminate an agent.
+
+    Issues `POST /agents/{id}/terminate` and then polls the control plane
+    for staged progress: issue → cooperative wait → cert confirmed.
+
+    Prints the policy's worst-case latency budget upfront so the user
+    isn't surprised by the wait. Times out at 2x worst-case and reports
+    "kill issued but unconfirmed" — see TODO #4 for the UX motivation.
+    """
+    _run(_kill(agent_id, reason=reason, poll_interval=poll_interval))
+
+
+async def _kill(agent_id: str, *, reason: str, poll_interval: float) -> None:
+    async with StasisClient.from_config() as client:
+        # Step 0: fetch the agent + its policy so we can print the
+        # worst-case latency budget. Two extra round trips before kill,
+        # but the UX win is worth it — the user types `stasis kill` and
+        # immediately knows "this might take ~43s." See TODO #4.
+        try:
+            agent = await client.get_agent(agent_id)
+        except NotFoundError:
+            err_console.print(f"[red]not found:[/red] {agent_id}")
+            raise typer.Exit(4) from None
+
+        worst_case_seconds = _worst_case_latency(agent.policy_name)
+        cli_timeout_seconds = max(60.0, worst_case_seconds * 2)
+
+        console.print(
+            f"[dim]policy={agent.policy_name}; worst-case cooperative kill "
+            f"latency = {worst_case_seconds:.0f}s "
+            f"(poll + grace + verification). CLI timeout: "
+            f"{cli_timeout_seconds:.0f}s.[/dim]"
+        )
+
+        # Step 1: issue the kill.
+        try:
+            result = await client.terminate_agent(agent_id, reason=reason)
+        except ConflictError as exc:
+            err_console.print(f"[yellow]already dying:[/yellow] {exc}")
+            raise typer.Exit(3) from exc
+
+        if isinstance(result, int):
+            # 409 → the partial-unique race; treat as success-ish.
+            console.print(
+                f"[yellow]✓[/yellow] kill already in flight "
+                f"(existing kill_event={result})"
+            )
+            kill_event_id = result
+        else:
+            console.print(
+                f"[green]✓[/green] kill issued (kill_event={result.id})"
+            )
+            kill_event_id = result.id
+
+        # Step 2: watch the agent transition. The CLI polls every
+        # `poll_interval` for display; this is independent of the SDK
+        # poller's `kill_poll_interval_seconds` (which is what *the
+        # agent process* uses to pick up the kill).
+        await _watch_kill(
+            client,
+            agent_id,
+            kill_event_id=kill_event_id,
+            poll_interval=poll_interval,
+            timeout_seconds=cli_timeout_seconds,
+        )
+
+
+def _worst_case_latency(policy_name: str) -> float:
+    """Sum the three windows in `policy.thresholds` that bound manual-kill
+    latency. Unknown policy → conservative fallback (~43s)."""
+    try:
+        policy = resolve_policy(policy_name)
+    except UnknownPolicyError:
+        return 43.0
+    t = policy.thresholds
+    # No per-policy kill_poll_interval yet (TODO #4) — use the SDK default.
+    from stasis_agent.watcher import DEFAULT_KILL_POLL_INTERVAL
+
+    return float(
+        DEFAULT_KILL_POLL_INTERVAL
+        + t.cooperative_grace_seconds
+        + t.verification_timeout_seconds
+    )
+
+
+async def _watch_kill(
+    client: StasisClient,
+    agent_id: str,
+    *,
+    kill_event_id: int,
+    poll_interval: float,
+    timeout_seconds: float,
+) -> None:
+    """Poll the agent until terminal or the wall clock runs out."""
+    start = time.monotonic()
+    last_status: AgentStatus | None = None
+    cooperative_announced = False
+
+    while True:
+        try:
+            agent = await client.get_agent(agent_id)
+        except NotFoundError:
+            err_console.print("[red]agent disappeared during kill[/red]")
+            raise typer.Exit(4) from None
+
+        elapsed = time.monotonic() - start
+
+        if agent.status != last_status:
+            last_status = agent.status
+
+        if agent.status == AgentStatus.DYING and not cooperative_announced:
+            console.print(
+                "[dim]… agent acknowledged kill; running cooperative "
+                "shutdown[/dim]"
+            )
+            cooperative_announced = True
+
+        if agent.status == AgentStatus.TERMINATED:
+            console.print(
+                f"[green]✓[/green] confirmed dead "
+                f"([dim]elapsed {elapsed:.1f}s[/dim])"
+            )
+            return
+
+        if elapsed >= timeout_seconds:
+            err_console.print(
+                f"[yellow]…[/yellow] kill issued but unconfirmed within "
+                f"{timeout_seconds:.0f}s. "
+                f"Agent may be a zombie (SDK didn't cooperate). Check "
+                f"`stasis logs {agent_id}` or `stasis fleet`. "
+                f"kill_event={kill_event_id}"
+            )
+            raise typer.Exit(6)
+
+        await asyncio.sleep(poll_interval)
 
 
 @app.command()

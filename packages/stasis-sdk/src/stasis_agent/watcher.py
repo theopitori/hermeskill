@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("stasis_agent.watcher")
 
 DEFAULT_HEARTBEAT_INTERVAL = 30  # seconds — overridden per-watcher by policy
+DEFAULT_KILL_POLL_INTERVAL = 3  # seconds — M4 manual-kill latency budget
 EVENT_BATCH_MAX = 500
 
 
@@ -85,6 +86,19 @@ class WatcherState:
     # made. Goes into the death cert's `triggered_at`. Distinct from the
     # cert's `terminated_at` (which is when the agent actually exits).
     terminate_requested_at: datetime | None = None
+
+    # Manual-kill context (M4). Populated by the kill-pending poller
+    # *before* it calls `request_termination()` so the cert builder sees
+    # both the flag and the operator info atomically from its POV.
+    #
+    # Shape: {"operator": str | None, "operator_reason": str | None,
+    #         "kill_event_id": int}.
+    #
+    # `None` for auto-kill paths; the cert builder branches on
+    # presence/absence rather than on `trigger_type` so a future kill
+    # source (programmatic, scheduled) can populate this without a
+    # separate enum bit.
+    manual_kill: dict[str, Any] | None = None
 
     # Append-only forensic log — populated by `record_shutdown_step()`
     # during the apoptosis sequence (cert built, hook ran, etc.). Goes
@@ -196,6 +210,7 @@ class WatcherState:
         reason: str,
         *,
         kill_event_id: str | None = None,
+        manual_kill: dict[str, Any] | None = None,
     ) -> None:
         """Flip the apoptosis flag (first-cause wins) and wake the watchdog.
 
@@ -209,12 +224,19 @@ class WatcherState:
         external grant revocations — should go through this method so the
         watchdog wakes immediately rather than waiting for its poll, and
         so `terminate_requested_at` is captured for the death cert.
+
+        `manual_kill` carries operator context for M4 kills. It's set
+        **inside** this method (rather than by the caller before the
+        call) so first-cause-wins covers both fields atomically: an
+        auto-kill that lands a microsecond before the poller can't be
+        retroactively re-classified as manual.
         """
         if not self.terminate_requested:
             self.terminate_requested = True
             self.terminate_reason = reason
             self.terminate_kill_event_id = kill_event_id
             self.terminate_requested_at = datetime.now(UTC)
+            self.manual_kill = manual_kill
             # Record the first shutdown-log step at the moment of decision
             # so the death cert (built later, from this same list) has
             # something to show — even if the kill path is very short
@@ -475,13 +497,156 @@ def ensure_worker_started(
     client: StasisClient,
     *,
     heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL,
+    kill_poll_interval: float = DEFAULT_KILL_POLL_INTERVAL,
 ) -> BackgroundWorker:
-    """Start the per-process worker if not already running. Idempotent."""
+    """Start the per-process worker if not already running. Idempotent.
+
+    Also boots the kill-pending poller (a sibling singleton, M4). The
+    poller has its own cadence — heartbeat is 30s by default but kills
+    need to land within a few seconds, so folding them together would
+    either waste bandwidth or hurt latency.
+    """
     with BackgroundWorker._instance_lock:
         existing = BackgroundWorker._instance
+        if existing is None:
+            worker = BackgroundWorker(client, heartbeat_interval=heartbeat_interval)
+            worker._start()
+            BackgroundWorker._instance = worker
+            existing = worker
+    # Kill-pending poller lives outside the BackgroundWorker class so its
+    # cadence + failure mode don't entangle with heartbeats.
+    ensure_kill_poller_started(client, interval=kill_poll_interval)
+    return existing
+
+
+# --- M4 kill-pending poller (sibling singleton) --------------------------
+
+
+class KillPendingPoller:
+    """The single per-process task that polls `GET /kills/pending`.
+
+    On each tick: ask the control plane for pending **manual** kills
+    across all this caller's agents, look each one up in the local
+    registry, and trigger cooperative termination. Auto-kills aren't
+    surfaced — the SDK originates them, so it already knows.
+
+    Why a sibling and not part of `BackgroundWorker`:
+      * Cadence differs (3s vs 30s heartbeat).
+      * Failure isolation: a slow heartbeat shouldn't add latency to
+        kill delivery, and a hung kill-poll shouldn't starve the event
+        drain.
+      * Lifecycle is paired anyway — `ensure_worker_started` boots both.
+    """
+
+    _instance: ClassVar[KillPendingPoller | None] = None
+    _instance_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(
+        self,
+        client: StasisClient,
+        *,
+        interval: float = DEFAULT_KILL_POLL_INTERVAL,
+    ) -> None:
+        self._client = client
+        self._interval = interval
+        self._task: asyncio.Task[None] | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._owning_loop: asyncio.AbstractEventLoop | None = None
+
+    @classmethod
+    def get(cls) -> KillPendingPoller | None:
+        with cls._instance_lock:
+            return cls._instance
+
+    @classmethod
+    async def stop(cls) -> None:
+        with cls._instance_lock:
+            inst = cls._instance
+            cls._instance = None
+        if inst is not None:
+            await inst._stop_internal()
+
+    def _start(self) -> None:
+        loop = asyncio.get_running_loop()
+        self._owning_loop = loop
+        self._stop_event = asyncio.Event()
+        self._task = loop.create_task(self._run(), name="stasis-kill-poller")
+
+    async def _run(self) -> None:
+        assert self._stop_event is not None
+        logger.debug("KillPendingPoller started (interval=%ds)", self._interval)
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self._interval
+                    )
+                    break  # stop requested
+                except TimeoutError:
+                    pass
+                await self._tick()
+        except asyncio.CancelledError:
+            logger.debug("KillPendingPoller cancelled")
+            raise
+
+    async def _tick(self) -> None:
+        try:
+            pending = await self._client.list_pending_kills()
+        except Exception:
+            # Network blip, server down, etc. — log and try again next
+            # tick. Customer's agent process must NOT die just because
+            # the control plane is unreachable.
+            logger.exception("kill-pending poll failed")
+            return
+        if not pending:
+            return
+        for entry in pending:
+            state = get_watcher(entry.agent_id)
+            if state is None:
+                # Agent isn't watched by this process — could be a
+                # different worker holding it, or it died already. The
+                # server will eventually mark it ZOMBIE (sweeper,
+                # deferred) or someone else will pick it up.
+                continue
+            if state.terminate_requested:
+                # Already being killed (auto symptom got there first, or
+                # we delivered this on a prior tick). Skip — first-cause
+                # wins, and request_termination wouldn't overwrite the
+                # auto context anyway.
+                continue
+            # request_termination owns the atomicity: it writes the flag,
+            # reason, manual_kill, and shutdown_log step under one logical
+            # transition. An auto-symptom landing concurrently still wins
+            # the flag race — both branches go through the same gate.
+            state.request_termination(
+                f"manual kill: {entry.operator_reason or entry.trigger_reason}",
+                kill_event_id=str(entry.kill_event_id),
+                manual_kill={
+                    "operator": entry.operator,
+                    "operator_reason": entry.operator_reason,
+                    "kill_event_id": entry.kill_event_id,
+                },
+            )
+
+    async def _stop_internal(self) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._task
+
+
+def ensure_kill_poller_started(
+    client: StasisClient,
+    *,
+    interval: float = DEFAULT_KILL_POLL_INTERVAL,
+) -> KillPendingPoller:
+    """Start the per-process kill poller if not already running. Idempotent."""
+    with KillPendingPoller._instance_lock:
+        existing = KillPendingPoller._instance
         if existing is not None:
             return existing
-        worker = BackgroundWorker(client, heartbeat_interval=heartbeat_interval)
-        worker._start()
-        BackgroundWorker._instance = worker
-        return worker
+        poller = KillPendingPoller(client, interval=interval)
+        poller._start()
+        KillPendingPoller._instance = poller
+        return poller

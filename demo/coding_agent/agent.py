@@ -29,6 +29,14 @@ agent cooperatively and leaves a death certificate on the control plane:
     --induce wall_clock  — backdate started_monotonic 9999s → trips runtime
     --induce scope       — call a tool not in the policy allowlist
 
+**Idle mode (M4)** — long-running well-behaved loop, intended for testing
+manual kill. The agent registers and then sleeps in 0.5s ticks, calling
+a tool each tick so the L1 checkpoint fires often. The SDK's kill-pending
+poller picks up an operator-issued `/terminate` within ~3s and the next
+checkpoint raises StasisTerminated.
+
+    --idle               — loop until killed externally (or 120s timeout)
+
 No real LLM is invoked — the goal here is to demonstrate the SDK plumbing
 end-to-end, not exercise an LLM provider. M6 adds a real coding loop that
 actually fixes a deliberately-broken sample repo.
@@ -194,7 +202,29 @@ _INDUCE_NODES = {
 }
 
 
-def build_graph(induce: str | None = None) -> Any:
+def _idle_step(state: AgentState, config: RunnableConfig) -> AgentState:
+    """Long-running, well-behaved loop.
+
+    For DoD step 7 (manual kill). Reads a file every 0.5s for up to 120s
+    so an operator has plenty of time to issue `stasis kill`. Each
+    iteration goes through `read_file.invoke(...)` which fires
+    `on_tool_start` → L1 checkpoint, so the kill poller's flag flip is
+    observed within roughly one tick.
+    """
+    print("[idle] looping; waiting to be killed", flush=True)
+    deadline = time.monotonic() + 120.0
+    i = 0
+    while time.monotonic() < deadline:
+        # Mix the iteration into the tool args so we don't trip the loop
+        # detector — different signatures each tick.
+        read_file.invoke({"path": f"idle-tick-{i}.txt"}, config=config)
+        time.sleep(0.5)
+        i += 1
+    print("[idle] timed out without being killed", flush=True)
+    return {"files_read": [f"idle-tick-{i}.txt"]}
+
+
+def build_graph(induce: str | None = None, idle: bool = False) -> Any:
     """Build the demo graph; if `induce` is set, splice in a misbehaving node.
 
     The misbehavior node sits between `plan` and `read` — that placement
@@ -209,16 +239,24 @@ def build_graph(induce: str | None = None) -> Any:
     g.add_node("finish", finish)
 
     g.add_edge(START, "plan")
-    if induce:
+    if idle:
+        # Idle mode: replace the working nodes with a long-running loop
+        # that waits for the kill poller to flip the apoptosis flag.
+        g.add_node("idle", _idle_step)
+        g.add_edge("plan", "idle")
+        g.add_edge("idle", "finish")
+    elif induce:
         if induce not in _INDUCE_NODES:
             raise ValueError(f"unknown induce mode: {induce!r}")
         g.add_node("induce", _INDUCE_NODES[induce])
         g.add_edge("plan", "induce")
         g.add_edge("induce", "read")
+        g.add_edge("read", "edit")
+        g.add_edge("edit", "finish")
     else:
         g.add_edge("plan", "read")
-    g.add_edge("read", "edit")
-    g.add_edge("edit", "finish")
+        g.add_edge("read", "edit")
+        g.add_edge("edit", "finish")
     g.add_edge("finish", END)
     return g.compile()
 
@@ -226,15 +264,25 @@ def build_graph(induce: str | None = None) -> Any:
 # --- entry point ---------------------------------------------------------
 
 
-async def run(task: str = "fix the bug in dummy.py", induce: str | None = None) -> None:
+async def run(
+    task: str = "fix the bug in dummy.py",
+    induce: str | None = None,
+    idle: bool = False,
+) -> None:
     _load_dotenv()
-    graph = build_graph(induce=induce)
+    graph = build_graph(induce=induce, idle=idle)
+    if idle:
+        agent_name = "demo-coding-bot-idle"
+    elif induce:
+        agent_name = f"demo-coding-bot-induce-{induce}"
+    else:
+        agent_name = "demo-coding-bot"
     try:
         watched = await watch(
             graph,
-            name="demo-coding-bot" if not induce else f"demo-coding-bot-induce-{induce}",
+            name=agent_name,
             policy="coding-default",
-            metadata={"demo": True, "induce": induce},
+            metadata={"demo": True, "induce": induce, "idle": idle},
         )
     except AuthError as exc:
         print(f"\nauth error: {exc}", file=sys.stderr)
@@ -283,9 +331,14 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="deliberately misbehave to trip the named symptom check",
     )
+    p.add_argument(
+        "--idle",
+        action="store_true",
+        help="run a long-lived idle loop (for testing manual kill)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    asyncio.run(run(task=args.task, induce=args.induce))
+    asyncio.run(run(task=args.task, induce=args.induce, idle=args.idle))

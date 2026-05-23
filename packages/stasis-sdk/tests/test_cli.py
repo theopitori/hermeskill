@@ -293,11 +293,206 @@ def test_version_flag_prints_version_only() -> None:
     assert result.stdout.strip().count("\n") == 0
 
 
-def test_kill_command_says_not_implemented() -> None:
-    result = runner.invoke(app, ["kill", str(uuid4()), "--reason", "deploy"])
-    assert result.exit_code == 1
-    out = (result.stdout or "") + (result.stderr or "")
-    assert "M4" in out
+def _kill_handlers(aid: str) -> Any:
+    """Return a stateful handler that walks an agent through the
+    manual-kill lifecycle: running → dying → terminated.
+
+    First GET /agents/{id} returns running; POST /terminate returns the
+    new kill_event (201); subsequent GETs return dying once, then
+    terminated. The CLI should print the staged progress and exit 0.
+    """
+    now = datetime.now(UTC).isoformat()
+    states = ["running", "dying", "terminated"]
+    cursor = {"i": 0}
+    kill_event = {
+        "id": 7,
+        "agent_id": aid,
+        "trigger_type": "manual",
+        "trigger_reason": "manual kill",
+        "status": "initiated",
+        "triggered_at": now,
+        "terminated_at": None,
+        "death_certificate": None,
+        "shutdown_log": [],
+        "operator_reason": "deploy rollback",
+        "created_at": now,
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if req.method == "GET" and path == f"/agents/{aid}":
+            i = min(cursor["i"], len(states) - 1)
+            cursor["i"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "id": aid,
+                    "name": "alpha",
+                    "policy_name": "coding-default",
+                    "status": states[i],
+                    "registered_at": now,
+                    "last_heartbeat_at": now,
+                    "terminated_at": now if states[i] == "terminated" else None,
+                },
+            )
+        if req.method == "POST" and path == f"/agents/{aid}/terminate":
+            return httpx.Response(201, json=kill_event)
+        return httpx.Response(500, json={"detail": f"unhandled {req.method} {path}"})
+
+    return handler
+
+
+def test_kill_command_walks_staged_progress_to_terminated() -> None:
+    aid = str(uuid4())
+    _set_handler(_kill_handlers(aid))
+    result = runner.invoke(
+        app,
+        ["kill", aid, "--reason", "deploy rollback", "--poll-interval", "0.1"],
+    )
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    out = result.stdout
+    # Worst-case latency banner
+    assert "worst-case" in out
+    # Issue confirmation
+    assert "kill issued" in out
+    # Cooperative announcement (fires when status hits DYING)
+    assert "cooperative shutdown" in out
+    # Final confirmation
+    assert "confirmed dead" in out
+
+
+def test_kill_command_409_treated_as_already_dying() -> None:
+    aid = str(uuid4())
+    now = datetime.now(UTC).isoformat()
+    states = ["dying", "terminated"]
+    cursor = {"i": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if req.method == "GET" and path == f"/agents/{aid}":
+            i = min(cursor["i"], len(states) - 1)
+            cursor["i"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "id": aid,
+                    "name": "alpha",
+                    "policy_name": "coding-default",
+                    "status": states[i],
+                    "registered_at": now,
+                    "last_heartbeat_at": now,
+                    "terminated_at": now if states[i] == "terminated" else None,
+                },
+            )
+        if req.method == "POST" and path == f"/agents/{aid}/terminate":
+            return httpx.Response(
+                409,
+                json={
+                    "detail": {
+                        "detail": "agent already has an active kill_event",
+                        "existing_kill_event_id": 42,
+                    }
+                },
+            )
+        return httpx.Response(500, json={"detail": "unhandled"})
+
+    _set_handler(handler)
+    result = runner.invoke(
+        app, ["kill", aid, "--reason", "x", "--poll-interval", "0.1"]
+    )
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    out = result.stdout
+    assert "already in flight" in out
+    assert "42" in out
+
+
+def test_kill_command_unknown_agent_exits_4() -> None:
+    aid = str(uuid4())
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "agent not found"})
+
+    _set_handler(handler)
+    result = runner.invoke(app, ["kill", aid, "--reason", "x"])
+    assert result.exit_code == 4
+
+
+def test_kill_command_developer_key_403_treated_as_auth_error() -> None:
+    aid = str(uuid4())
+    now = datetime.now(UTC).isoformat()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "id": aid,
+                    "name": "alpha",
+                    "policy_name": "coding-default",
+                    "status": "running",
+                    "registered_at": now,
+                    "last_heartbeat_at": now,
+                    "terminated_at": None,
+                },
+            )
+        return httpx.Response(403, json={"detail": "operator role required"})
+
+    _set_handler(handler)
+    result = runner.invoke(app, ["kill", aid, "--reason", "x"])
+    # _request maps 403 → AuthError, which the CLI handles → exit 2.
+    assert result.exit_code == 2
+
+
+def test_worst_case_latency_known_policy() -> None:
+    from stasis_agent.cli import _worst_case_latency
+
+    # coding-default: grace=10, verification=30, plus DEFAULT_KILL_POLL_INTERVAL=3
+    assert _worst_case_latency("coding-default") == pytest.approx(43.0)
+
+
+def test_worst_case_latency_unknown_policy_falls_back() -> None:
+    from stasis_agent.cli import _worst_case_latency
+
+    # Conservative ~43s fallback for unknown policies.
+    assert _worst_case_latency("custom-not-shipped") == pytest.approx(43.0)
+
+
+def test_watch_kill_times_out_with_exit_6(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zombie path unit-tested directly against `_watch_kill` to avoid
+    waiting on the CLI's 60s minimum timeout floor."""
+    import asyncio as _asyncio
+
+    import typer as _typer
+    from stasis_agent.cli import _watch_kill
+
+    aid = str(uuid4())
+    now = datetime.now(UTC).isoformat()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": aid,
+                "name": "alpha",
+                "policy_name": "coding-default",
+                "status": "running",
+                "registered_at": now,
+                "last_heartbeat_at": now,
+                "terminated_at": None,
+            },
+        )
+
+    client = _client_with(handler)
+
+    async def go() -> None:
+        await _watch_kill(
+            client, aid, kill_event_id=7, poll_interval=0.01, timeout_seconds=0.1
+        )
+
+    with pytest.raises(_typer.Exit) as exc:
+        _asyncio.run(go())
+    assert exc.value.exit_code == 6
+    _asyncio.run(client.aclose())
 
 
 def test_grant_command_says_not_implemented() -> None:
