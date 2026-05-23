@@ -11,7 +11,7 @@ Steps 5-9 are filled in by later milestones:
 
     5. Webhook delivery       — deferred from MVP (post-v1)
     6. One-click feedback     — M3 (landed; not yet wired into this script)
-    7. Manual kill            — M4
+    7. Manual kill            — M4 (this script)
     8. Grant (apoptosis-proof) — M5
     9. Manual kill bypasses grant — M5
 
@@ -210,6 +210,150 @@ def step_4_death_certificate(agent_id: str) -> None:
     asyncio.run(_check())
 
 
+def step_7_manual_kill() -> None:
+    """DoD #7: operator issues `stasis kill`; the agent dies cooperatively
+    and the cert records the operator + reason.
+
+    Flow:
+      1. Launch the idle demo agent in the background.
+      2. Poll the fleet until it registers; capture its id.
+      3. Run `stasis kill <id> --reason "..."` with the operator key.
+      4. Wait for the agent process to exit (cooperative — exit code 3).
+      5. Read the kill_event and verify trigger_type=manual + operator_reason.
+    """
+    _header(7, "manual kill — operator-issued cooperative termination")
+
+    import asyncio
+    import re as _re
+
+    from stasis_agent.client import StasisClient
+
+    # Step 1: launch idle agent in the background. We bypass _run because
+    # it waits for completion; here we need the process alive.
+    print("  launching idle agent…")
+    agent_proc = subprocess.Popen(
+        ["uv", "run", "python", "demo/coding_agent/agent.py", "--idle"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    agent_id: str | None = None
+    try:
+        # Step 2: wait for the agent to register. The agent prints
+        # `tip: uv run stasis logs <id>` on exit, but for kill-mid-run we
+        # need to find it earlier — poll the fleet for a `demo-coding-bot-idle`
+        # entry. Cap at 30s.
+        async def _find_agent() -> str:
+            async with StasisClient.from_config() as client:
+                for _ in range(60):
+                    fleet = await client.list_agents()
+                    matches = [
+                        a
+                        for a in fleet
+                        if a.name == "demo-coding-bot-idle"
+                        and a.status.value != "terminated"
+                    ]
+                    if matches:
+                        # The newest is at the front (registered_at desc).
+                        return str(matches[0].id)
+                    await asyncio.sleep(0.5)
+                _fail("idle agent did not register within 30s")
+                return ""  # unreachable; satisfies type checker
+
+        agent_id = asyncio.run(_find_agent())
+        _ok(f"idle agent registered, agent_id={agent_id}")
+
+        # Step 3: issue the kill. Use the operator key — developer key
+        # would 403 here. Force UTF-8 on the child stdio so Rich's
+        # `✓`/`…` glyphs don't crash on Windows' cp1252 default.
+        op_key = "sk_dev_operator_local_only_do_not_ship"
+        kill_env = {
+            **os.environ,
+            "STASIS_API_KEY": op_key,
+            "PYTHONIOENCODING": "utf-8",
+        }
+        print("  issuing `stasis kill`…")
+        kill_proc = subprocess.run(
+            [
+                "uv",
+                "run",
+                "stasis",
+                "kill",
+                agent_id,
+                "--reason",
+                "DoD step 7: manual kill demo",
+                "--poll-interval",
+                "0.5",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=kill_env,
+            timeout=120.0,
+            check=False,
+        )
+        if kill_proc.returncode != 0:
+            print(kill_proc.stdout)
+            print(kill_proc.stderr, file=sys.stderr)
+            _fail(f"`stasis kill` exited {kill_proc.returncode}")
+        if "confirmed dead" not in kill_proc.stdout:
+            _fail("`stasis kill` did not confirm death")
+        _ok("CLI reported confirmed dead")
+
+        # Step 4: the agent process should exit on its own with code 3
+        # once StasisTerminated bubbles up.
+        try:
+            agent_proc.wait(timeout=30.0)
+        except subprocess.TimeoutExpired:
+            agent_proc.kill()
+            _fail("idle agent did not exit within 30s after kill")
+        if agent_proc.returncode != 3:
+            _fail(
+                f"agent exited {agent_proc.returncode}, expected 3 "
+                f"(StasisTerminated)"
+            )
+        _ok("agent process exited 3 (StasisTerminated)")
+
+        # Step 5: verify the kill_event carries operator context.
+        async def _verify_cert() -> None:
+            async with StasisClient.from_config() as client:
+                kills = await client.list_kill_events(agent_id)
+                if not kills:
+                    _fail("no kill_events found")
+                ke = kills[0]
+                if ke.trigger_type.value != "manual":
+                    _fail(f"trigger_type={ke.trigger_type.value} (expected manual)")
+                if ke.status.value != "confirmed":
+                    _fail(f"status={ke.status.value} (expected confirmed)")
+                if not ke.operator_reason:
+                    _fail("operator_reason missing on kill_event")
+                cert = ke.death_certificate
+                if cert is None:
+                    _fail("kill_event has no death_certificate")
+                assert cert is not None  # narrows for static checkers; _fail exits
+                # The SDK should have set both fields based on
+                # state.manual_kill from the poller payload.
+                if cert.trigger_type.value != "manual":
+                    _fail(f"cert.trigger_type={cert.trigger_type.value}")
+                _ok(f"kill_event id={ke.id} trigger=manual status=confirmed")
+                _ok(f"  operator_reason: {ke.operator_reason}")
+                _ok(f"  cert.operator:   {cert.operator}")
+
+        # _re used below if we ever need to parse the CLI output; silence
+        # the import-but-unused lint.
+        _ = _re
+        asyncio.run(_verify_cert())
+
+    finally:
+        if agent_proc.poll() is None:
+            agent_proc.kill()
+            agent_proc.wait(timeout=5.0)
+
+
 # --- helpers -------------------------------------------------------------
 
 
@@ -277,11 +421,14 @@ def main() -> None:
         assert induced_agent is not None
         step_4_death_certificate(induced_agent)
 
+    if 7 not in skip:
+        step_7_manual_kill()
+
     print()
     print("=" * 70)
-    print("  DoD steps 1-4 PASSED.")
+    print("  DoD steps 1-4 + 7 PASSED.")
     print("  Step 6 (feedback) shipped in M3 but isn't wired into this script yet;")
-    print("  steps 7-9 land in M4 (manual kill) and M5 (grants). Webhooks deferred.")
+    print("  steps 8-9 land in M5 (grants). Webhooks deferred.")
     print("=" * 70)
 
 

@@ -351,3 +351,38 @@ class KillEventConflict(BaseModel):
 
     detail: str
     existing_kill_event_id: int
+
+
+# --- manual kill (M4) ---------------------------------------------------
+
+
+class TerminateAgentIn(BaseModel):
+    """POST body for /agents/{id}/terminate.
+
+    `reason` is the operator's free-form justification. It's persisted on
+    `kill_events.operator_reason` and surfaces in the death cert + the
+    `stasis logs` view, so write something a human will read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class PendingKillOut(BaseModel):
+    """One entry in `GET /kills/pending` — a kill the SDK should act on.
+
+    The SDK's poller maps each entry to a local `WatcherState`, stashes
+    the operator context on `state.manual_kill`, then calls
+    `request_termination()` so the L1 cooperative gate fires at the next
+    checkpoint.
+    """
+
+    agent_id: UUID
+    kill_event_id: int
+    trigger_reason: str
+    triggered_at: datetime
+    operator_reason: str | None = None
+    # Identifier of the operator's api_key (audit; SDK never authenticates
+    # against it). Stamped into the death cert as `operator`.
+    operator: str | None = None

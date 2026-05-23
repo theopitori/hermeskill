@@ -25,25 +25,34 @@ the default policy — bash commands hang all the time.
 
 ---
 
-## [ ] #4 — Manual-kill latency math is bad UX in the default config
+## [x] #4 — Manual-kill latency math is bad UX in the default config — **PARTIAL (M4)**
 
-Default: poll interval 3s + cooperative grace 10s + verification timeout 30s =
-**up to 43s** before forced kill. CLI user running `stasis kill <agent>` and
-watching it will perceive this as broken even though it's working as designed.
+Landed in M4:
+- `stasis kill` now prints the worst-case latency banner up front
+  (`policy=… worst-case cooperative kill latency = 43s (poll + grace +
+  verification). CLI timeout: 86s.`) so the user has the right mental
+  model before the wait starts.
+- Staged progress: `✓ kill issued (kill_event=…)` → `… cooperative
+  shutdown` (on `dying`) → `✓ confirmed dead (elapsed N.Ns)`.
+- Timeout path exits 6 with a "kill issued but unconfirmed within Xs"
+  message naming the kill_event id, instead of polling forever.
+- CLI poll cadence (`--poll-interval`, default 0.5s) is independent of
+  the agent's policy poll interval — it's purely a display knob.
 
-**Fix when we get to M4:**
-- Make `kill_poll_interval_seconds` per-policy configurable; some users will
-  accept higher load to get 1s polling.
-- CLI `stasis kill` needs a **staged progress indicator**:
-  ```
-  ✓ kill issued
-  … waiting for agent to acknowledge (0/10s)
-  … agent dying (cleanup hooks running)
-  … forced kill escalating (cooperative grace exceeded)
-  ✓ confirmed dead (12.4s)
-  ```
-- Print the policy's worst-case latency at kill issue time so the user has the
-  right mental model.
+Deferred:
+- **Per-policy `kill_poll_interval_seconds`.** Still a process-wide SDK
+  default (`DEFAULT_KILL_POLL_INTERVAL = 3`). Customers who want 1s
+  polling can override at `ensure_worker_started(kill_poll_interval=…)`;
+  driving it off `min(policy.thresholds.kill_poll_interval)` across the
+  registry is a follow-up if anyone asks. Not blocking on it because
+  no user wants this yet, and the per-policy bit creates a fan-in
+  problem (which policy wins?) that's better postponed than guessed.
+- **Server-side INITIATED→CONFIRMED/ZOMBIE sweeper.** Mentioned in the
+  `KillEventStatus` docstring as "Set by the server-side sweeper (M4)"
+  but cut from MVP — the happy path posts the cert via M2.5's UPDATE
+  which promotes status. The sweeper is only needed when the SDK
+  *never* posts (process crash mid-kill), which is the zombie case the
+  CLI's exit-6 message already surfaces to the operator.
 
 ---
 
@@ -233,6 +242,7 @@ tests anyway — creating it now saves a context switch later.
 
 ## Resolved
 
+- **#4** — Manual-kill staged progress + worst-case latency banner (M4). Per-policy poll + server sweeper deferred; see section above.
 - **#6** — PyPI namespace: dist `stasis-agent`, import `stasis_agent`, CLI `stasis`.
 - **#9** — Feedback token hashing symmetric (M3). See section above.
 - **#11** — `/healthz` upgraded to `SELECT 1` probe in M1.2, returns 503 on DB failure with `db_error` field.
