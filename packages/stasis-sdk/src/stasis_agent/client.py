@@ -29,11 +29,15 @@ from stasis_agent.types import (
     EventBatchIn,
     EventIn,
     EventPage,
+    GrantIn,
+    GrantOut,
+    GrantRevokeIn,
     HeartbeatIn,
     HeartbeatOut,
     KillEventIn,
     KillEventOut,
     PendingKillOut,
+    SymptomType,
     TerminateAgentIn,
 )
 
@@ -238,6 +242,50 @@ class StasisClient:
         """
         data = await self._request("GET", "/kills/pending")
         return [PendingKillOut.model_validate(p) for p in data]
+
+    # --- grants (M5) ------------------------------------------------------
+
+    async def create_grant(
+        self,
+        agent_id: UUID | str,
+        symptoms: list[SymptomType],
+        duration_seconds: int,
+        reason: str,
+    ) -> GrantOut:
+        """Operator-issued grant. Server validates symptoms against the
+        agent's policy + universal rules; 422 surfaces those failures."""
+        body = GrantIn(
+            symptoms=symptoms,
+            duration_seconds=duration_seconds,
+            reason=reason,
+        ).model_dump(mode="json")
+        data = await self._request(
+            "POST", f"/agents/{agent_id}/grants", json=body
+        )
+        return GrantOut.model_validate(data)
+
+    async def revoke_grant(self, grant_id: UUID | str, reason: str) -> GrantOut:
+        """Stamp `revoked_at` on a grant. Idempotent — a second revoke
+        returns the unchanged row, not an error."""
+        body = GrantRevokeIn(reason=reason).model_dump()
+        data = await self._request(
+            "POST", f"/grants/{grant_id}/revoke", json=body
+        )
+        return GrantOut.model_validate(data)
+
+    async def list_grants(
+        self,
+        agent_id: UUID | str,
+        *,
+        active_only: bool = False,
+    ) -> list[GrantOut]:
+        params: dict[str, Any] = {}
+        if active_only:
+            params["active_only"] = "true"
+        data = await self._request(
+            "GET", f"/agents/{agent_id}/grants", params=params
+        )
+        return [GrantOut.model_validate(g) for g in data]
 
     # --- events (continued) -----------------------------------------------
 

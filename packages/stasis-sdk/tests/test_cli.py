@@ -495,12 +495,42 @@ def test_watch_kill_times_out_with_exit_6(monkeypatch: pytest.MonkeyPatch) -> No
     _asyncio.run(client.aclose())
 
 
-def test_grant_command_says_not_implemented() -> None:
+def test_grant_command_rejects_unknown_symptom() -> None:
+    """`grant --symptoms <bogus>` validates before any network call."""
     result = runner.invoke(
         app,
-        ["grant", str(uuid4()), "--symptoms", "x", "--duration", "1h", "--reason", "y"],
+        [
+            "grant",
+            str(uuid4()),
+            "--symptoms",
+            "totally-fake-symptom",
+            "--duration",
+            "1h",
+            "--reason",
+            "y",
+        ],
     )
-    assert result.exit_code == 1
+    assert result.exit_code != 0
+    # The error message names the bad symptom.
+    out = (result.stdout or "") + (result.stderr or "")
+    assert "totally-fake-symptom" in out
+
+
+def test_grant_command_rejects_bad_duration() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "grant",
+            str(uuid4()),
+            "--symptoms",
+            "loop",
+            "--duration",
+            "notatime",
+            "--reason",
+            "y",
+        ],
+    )
+    assert result.exit_code != 0
 
 
 # --- helper sanity ------------------------------------------------------

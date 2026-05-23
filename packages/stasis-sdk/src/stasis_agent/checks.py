@@ -226,3 +226,67 @@ def run_all(state: WatcherState, policy: Policy) -> list[Terminal | Warning]:
         if not isinstance(result, Healthy):
             out.append(result)
     return out
+
+
+# --- M5: grant application ----------------------------------------------
+
+
+def apply_grants(
+    results: list[Terminal | Warning],
+    grants: list[dict[str, Any]],
+) -> list[Terminal | Warning]:
+    """Demote Terminal verdicts into Warnings when an active grant covers
+    the symptom.
+
+    Pure function — no I/O, no state mutation. Inputs:
+      * `results` from `run_all()` or `check_tool_scope()`.
+      * `grants` is the SDK's cached `state.grants` list (refreshed by
+        each heartbeat response).
+
+    A grant entry shape:
+        {"id": "<uuid>", "symptoms": ["loop", ...], "expires_at": "...", "reason": "..."}
+
+    Demotion rule: if ANY grant in the cache lists the result's symptom
+    by name, the Terminal becomes a Warning carrying the first matching
+    grant_id in `detail["grant_id"]`. The Warning still gets recorded as
+    a symptom event for audit — the death cert shows what *would have*
+    killed the agent even when a grant let it live.
+
+    Manual kill (M4) does not flow through this function — the kill
+    poller calls `request_termination()` directly. So a grant cannot
+    suppress an operator-issued kill, which is the security invariant
+    in `ApoptosisProofingDefaults`'s docstring.
+
+    **Snapshot semantics:** `grants` is the caller's snapshot — typically
+    `state.grants` at the moment `_apply_results` ran. Don't reach back
+    to `state.grants` from inside this function; another heartbeat could
+    replace it mid-decision and tear the verdict.
+    """
+    if not grants:
+        return results
+
+    # Index grants by symptom for O(1) lookup. We keep the first matching
+    # grant per symptom — sufficient for `detail["grant_id"]`.
+    by_symptom: dict[str, dict[str, Any]] = {}
+    for g in grants:
+        for s in g.get("symptoms", []):
+            by_symptom.setdefault(str(s), g)
+
+    out: list[Terminal | Warning] = []
+    for r in results:
+        if isinstance(r, Terminal) and r.symptom.value in by_symptom:
+            grant = by_symptom[r.symptom.value]
+            out.append(
+                Warning(
+                    symptom=r.symptom,
+                    reason=f"suppressed by grant: {r.reason}",
+                    detail={
+                        **r.detail,
+                        "grant_id": grant.get("id"),
+                        "grant_reason": grant.get("reason"),
+                    },
+                )
+            )
+        else:
+            out.append(r)
+    return out

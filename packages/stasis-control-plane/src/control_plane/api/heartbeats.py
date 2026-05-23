@@ -1,9 +1,9 @@
 """Heartbeats router.
 
 The SDK's `HeartbeatBatcher` (TODO #8) sends one heartbeat per registered
-agent per interval. We update `agents.last_heartbeat_at` and record a single
-event row for audit. The response will carry `active_grants[]` from M5; for
-M1 it's an empty list.
+agent per interval. We update `agents.last_heartbeat_at`, record a single
+event row for audit, and (M5) attach the agent's active grants to the
+response so the SDK can refresh its grant cache.
 """
 
 from datetime import UTC, datetime
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stasis_agent.types import EventType, HeartbeatIn, HeartbeatOut
 
 from control_plane.api.agents import _load_agent_owned_by
+from control_plane.api.grants import load_active_grants
 from control_plane.auth import Principal, require_principal
 from control_plane.db.models import Event
 from control_plane.db.session import get_session
@@ -45,5 +46,5 @@ async def post_heartbeat(
         )
     )
     await session.commit()
-    # active_grants will populate in M5 when the grants table exists.
-    return HeartbeatOut(received_at=now, active_grants=[])
+    grants = await load_active_grants(session, agent_id)
+    return HeartbeatOut(received_at=now, active_grants=grants)

@@ -195,8 +195,11 @@ class HeartbeatIn(BaseModel):
 class HeartbeatOut(BaseModel):
     """Heartbeat ack.
 
-    In M5 this response carries `active_grants[]` so the SDK can refresh its
-    in-process cache for grant application. Empty for now.
+    Carries `active_grants[]` (M5) so the SDK can refresh its in-process
+    cache for grant application. The cache is up to one heartbeat-interval
+    stale — a grant issued just after a heartbeat won't take effect on the
+    SDK until the next one lands. This is acceptable for MVP; if a tighter
+    SLO matters we'd need a sidechannel poll like M4 uses for kills.
     """
 
     received_at: datetime
@@ -367,6 +370,55 @@ class TerminateAgentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(min_length=1, max_length=2000)
+
+
+# --- grants (M5) --------------------------------------------------------
+
+
+class GrantIn(BaseModel):
+    """POST body for `/agents/{id}/grants`.
+
+    Operator-issued. The server validates `symptoms` against the agent's
+    policy `apoptosis_proofing.allowed_symptoms`, rejects `manual_kill`
+    unconditionally, and caps `duration_seconds` at 86_400 (24h). These
+    rules are policy- and design-level invariants — the wire format only
+    carries the request itself.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    symptoms: list[SymptomType] = Field(min_length=1)
+    duration_seconds: int = Field(ge=60, le=86_400)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class GrantRevokeIn(BaseModel):
+    """POST body for `/grants/{id}/revoke`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class GrantOut(BaseModel):
+    """A grant as the operator + SDK see it.
+
+    `active` is computed server-side: True iff `revoked_at is None and
+    expires_at > now()`. The SDK reads this off the heartbeat response;
+    operators read it via `stasis grant`/`stasis fleet`.
+    """
+
+    id: UUID
+    agent_id: UUID
+    symptoms: list[SymptomType]
+    reason: str
+    issued_by: UUID | None
+    issued_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    revoked_by: UUID | None
+    revoke_reason: str | None
+    active: bool
 
 
 class PendingKillOut(BaseModel):

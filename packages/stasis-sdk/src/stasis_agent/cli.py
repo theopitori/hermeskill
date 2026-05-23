@@ -30,8 +30,15 @@ from stasis_agent.client import (
     StasisClient,
     TransportError,
 )
+from stasis_agent.exceptions import StasisError
 from stasis_agent.policies import UnknownPolicyError, resolve_policy
-from stasis_agent.types import AgentStatus, AgentSummary, EventOut, EventType
+from stasis_agent.types import (
+    AgentStatus,
+    AgentSummary,
+    EventOut,
+    EventType,
+    SymptomType,
+)
 
 app = typer.Typer(
     name="stasis",
@@ -352,15 +359,52 @@ async def _watch_kill(
 
 @app.command()
 def grant(
-    agent_id: str = typer.Argument(...),
-    symptoms: str = typer.Option(..., "--symptoms"),
-    duration: str = typer.Option(..., "--duration"),
+    agent_id: str = typer.Argument(..., help="Agent UUID. See `stasis fleet`."),
+    symptoms: str = typer.Option(
+        ...,
+        "--symptoms",
+        help="Comma-separated symptom names (loop, tool_scope_violation, …).",
+    ),
+    duration: str = typer.Option(
+        ...,
+        "--duration",
+        help="How long the grant is valid. Format: 30m, 2h, 600s.",
+    ),
     reason: str = typer.Option(..., "--reason"),
 ) -> None:
-    """Grant apoptosis-proofing for specific symptoms (M5)."""
-    _ = (symptoms, duration, reason)
-    typer.echo(f"grant {agent_id}: not yet implemented (lands in M5)", err=True)
-    raise typer.Exit(1)
+    """Issue an apoptosis-proofing grant for an agent.
+
+    The agent's policy gates which symptoms are grantable; the server
+    422s on policy violations. `manual_kill` is never grantable.
+    """
+    _run(_grant(agent_id, symptoms=symptoms, duration=duration, reason=reason))
+
+
+async def _grant(
+    agent_id: str, *, symptoms: str, duration: str, reason: str
+) -> None:
+    parsed_symptoms = _parse_symptoms(symptoms)
+    duration_seconds = _parse_duration(duration)
+
+    async with StasisClient.from_config() as client:
+        try:
+            grant = await client.create_grant(
+                agent_id,
+                symptoms=parsed_symptoms,
+                duration_seconds=duration_seconds,
+                reason=reason,
+            )
+        except StasisError as exc:
+            err_console.print(f"[red]grant rejected:[/red] {exc}")
+            raise typer.Exit(7) from exc
+
+    console.print(f"[green]✓[/green] grant issued (id={grant.id})")
+    console.print(
+        f"  [dim]symptoms:[/dim] "
+        f"{', '.join(s.value for s in grant.symptoms)}"
+    )
+    console.print(f"  [dim]expires: [/dim] {grant.expires_at.isoformat()}")
+    console.print(f"  [dim]reason:  [/dim] {grant.reason}")
 
 
 @app.command()
@@ -368,10 +412,67 @@ def revoke(
     grant_id: str = typer.Argument(...),
     reason: str = typer.Option(..., "--reason"),
 ) -> None:
-    """Revoke an active apoptosis-proofing grant (M5)."""
-    _ = reason
-    typer.echo(f"revoke {grant_id}: not yet implemented (lands in M5)", err=True)
-    raise typer.Exit(1)
+    """Revoke an active apoptosis-proofing grant. Idempotent."""
+    _run(_revoke(grant_id, reason=reason))
+
+
+async def _revoke(grant_id: str, *, reason: str) -> None:
+    async with StasisClient.from_config() as client:
+        grant = await client.revoke_grant(grant_id, reason=reason)
+    if grant.revoked_at is not None:
+        console.print(
+            f"[green]✓[/green] grant revoked "
+            f"([dim]at {grant.revoked_at.isoformat()}[/dim])"
+        )
+    else:
+        # Idempotent path — server returned the unchanged row.
+        console.print("[yellow]…[/yellow] grant was already revoked")
+
+
+def _parse_symptoms(raw: str) -> list[SymptomType]:
+    out: list[SymptomType] = []
+    for token in raw.split(","):
+        name = token.strip()
+        if not name:
+            continue
+        try:
+            out.append(SymptomType(name))
+        except ValueError as exc:
+            valid = ", ".join(s.value for s in SymptomType)
+            raise typer.BadParameter(
+                f"unknown symptom {name!r}; valid: {valid}"
+            ) from exc
+    if not out:
+        raise typer.BadParameter("--symptoms cannot be empty")
+    return out
+
+
+def _parse_duration(raw: str) -> int:
+    """Accept 30s, 5m, 2h. Returns seconds. Caps at 24h to match server."""
+    raw = raw.strip().lower()
+    if not raw:
+        raise typer.BadParameter("--duration cannot be empty")
+    unit_seconds = {"s": 1, "m": 60, "h": 3600}
+    if raw[-1] in unit_seconds:
+        try:
+            n = int(raw[:-1])
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"bad --duration {raw!r}; use e.g. 30m, 2h, 600s"
+            ) from exc
+        seconds = n * unit_seconds[raw[-1]]
+    else:
+        try:
+            seconds = int(raw)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"bad --duration {raw!r}; use e.g. 30m, 2h, 600s"
+            ) from exc
+    if seconds < 60:
+        raise typer.BadParameter("--duration must be at least 60s")
+    if seconds > 86_400:
+        raise typer.BadParameter("--duration cannot exceed 24h (86400s)")
+    return seconds
 
 
 policies_app = typer.Typer(help="Manage supervision policies (M5).")

@@ -210,6 +210,69 @@ def step_4_death_certificate(agent_id: str) -> None:
     asyncio.run(_check())
 
 
+def _launch_and_find_idle_agent() -> tuple[subprocess.Popen[str], str]:
+    """Spawn the idle demo agent and return (process, agent_id) once it
+    registers in the fleet. Caller is responsible for cleanup.
+
+    Used by manual-kill (step 7) and the M5 demo steps (8 + 9), which all
+    need a long-lived agent they can poke from outside.
+
+    **Why we capture launch_time:** a previous step's idle agent that
+    was SIGKILL'd (not cooperatively terminated) leaves a stale "running"
+    row in the DB. Filtering by `registered_at >= launch_time` makes
+    sure we attach to *this* subprocess, not a ghost from a previous one.
+    """
+    import asyncio
+    from datetime import UTC, datetime
+
+    from stasis_agent.client import StasisClient
+
+    # Anchor *before* spawning so a fast-registering agent can't slip
+    # under the cutoff. `replace(microsecond=0)` truncates down → moves
+    # `launch_time` up to 999ms earlier than wall-clock, which is the
+    # buffer we want against test-host vs. control-plane clock skew.
+    # Don't "clean up" this truncation — the early bias is the point.
+    launch_time = datetime.now(UTC).replace(microsecond=0)
+
+    proc = subprocess.Popen(
+        ["uv", "run", "python", "demo/coding_agent/agent.py", "--idle"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    async def _find() -> str:
+        async with StasisClient.from_config() as client:
+            for _ in range(60):
+                fleet = await client.list_agents()
+                # Filter by registered_at >= launch_time so a stale row
+                # from a previous step doesn't get matched. The fleet is
+                # newest-first; the first match is our agent.
+                matches = [
+                    a
+                    for a in fleet
+                    if a.name == "demo-coding-bot-idle"
+                    and a.registered_at >= launch_time
+                ]
+                if matches:
+                    return str(matches[0].id)
+                await asyncio.sleep(0.5)
+            _fail("idle agent did not register within 30s")
+            return ""  # unreachable
+
+    try:
+        agent_id = asyncio.run(_find())
+    except Exception:
+        # Make sure we don't leak the subprocess if registration polling
+        # blew up.
+        proc.kill()
+        proc.wait(timeout=5.0)
+        raise
+    return proc, agent_id
+
+
 def step_7_manual_kill() -> None:
     """DoD #7: operator issues `stasis kill`; the agent dies cooperatively
     and the cert records the operator + reason.
@@ -354,6 +417,249 @@ def step_7_manual_kill() -> None:
             agent_proc.wait(timeout=5.0)
 
 
+def step_8_grant() -> None:
+    """DoD #8: operator issues an apoptosis-proofing grant; the SDK sees
+    it via the next heartbeat.
+
+    What this step demonstrates (operator workflow):
+      1. `stasis grant <id> --symptoms ... --duration ...` exits 0.
+      2. The grant is active in `/agents/{id}/grants?active_only=true`.
+      3. The grant lands in the agent's heartbeat response (this is how
+         the SDK actually picks it up — see HeartbeatOut.active_grants).
+
+    The "live agent under load actually survives a covered symptom"
+    claim is carried by the SDK unit tests (`test_grants.py`) — the
+    real-suppression path needs the grant to land *before* the symptom
+    fires, which is awkward in a single-shot demo with a 30s default
+    heartbeat. The operator-flow + plumbing is what this DoD step
+    verifies.
+
+    **Side effect:** this step kills its idle agent subprocess via
+    SIGKILL (not cooperative shutdown), so the agent's DB row is left
+    in `running` state — no cert ever posts. Step 9's
+    `_launch_and_find_idle_agent` uses a `registered_at` filter to
+    ignore this ghost row, but `stasis fleet` will show it stale until
+    something else terminates it.
+    """
+    _header(8, "grant — operator issues apoptosis-proofing")
+
+    import asyncio
+
+    from stasis_agent.client import StasisClient
+
+    print("  launching idle agent…")
+    agent_proc, agent_id = _launch_and_find_idle_agent()
+    _ok(f"idle agent registered, agent_id={agent_id}")
+
+    try:
+        # Step 1: issue the grant via the CLI.
+        op_key = "sk_dev_operator_local_only_do_not_ship"
+        grant_env = {
+            **os.environ,
+            "STASIS_API_KEY": op_key,
+            "PYTHONIOENCODING": "utf-8",
+        }
+        print("  issuing `stasis grant`…")
+        grant_proc = subprocess.run(
+            [
+                "uv",
+                "run",
+                "stasis",
+                "grant",
+                agent_id,
+                "--symptoms",
+                "tool_scope_violation",
+                "--duration",
+                "1h",
+                "--reason",
+                "DoD step 8: operator exploring a new tool",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=grant_env,
+            timeout=30.0,
+            check=False,
+        )
+        if grant_proc.returncode != 0:
+            print(grant_proc.stdout)
+            print(grant_proc.stderr, file=sys.stderr)
+            _fail(f"`stasis grant` exited {grant_proc.returncode}")
+        if "grant issued" not in grant_proc.stdout:
+            _fail("`stasis grant` did not confirm issuance")
+        _ok("CLI reported grant issued")
+
+        # Step 2: verify the grant is active via the API.
+        async def _verify() -> None:
+            async with StasisClient.from_config() as client:
+                actives = await client.list_grants(agent_id, active_only=True)
+                if not actives:
+                    _fail("no active grants found for agent")
+                g = actives[0]
+                if "tool_scope_violation" not in [s.value for s in g.symptoms]:
+                    _fail(
+                        f"grant symptoms={g.symptoms} missing tool_scope_violation"
+                    )
+                if not g.active:
+                    _fail("grant is not marked active")
+                _ok(f"grant id={g.id} active={g.active}")
+
+                # Step 3: heartbeat the agent ourselves and verify the
+                # response carries the grant. (The SDK's worker would do
+                # this too, but on its 30s cadence — we test the wire
+                # directly here.)
+                hb = await client._request(
+                    "POST",
+                    f"/agents/{agent_id}/heartbeat",
+                    json={"uptime_seconds": 1.0},
+                )
+                grants = hb.get("active_grants", [])
+                if not grants:
+                    _fail("heartbeat response did not include the grant")
+                _ok(f"heartbeat carries {len(grants)} active grant(s)")
+
+        asyncio.run(_verify())
+    finally:
+        if agent_proc.poll() is None:
+            agent_proc.kill()
+            agent_proc.wait(timeout=5.0)
+
+
+def step_9_manual_kill_bypasses_grant() -> None:
+    """DoD #9: an active grant covers some symptoms, but manual kill
+    bypasses every grant. This is the security invariant in
+    `ApoptosisProofingDefaults` — operators can always override.
+
+    Flow:
+      1. Launch idle agent.
+      2. Issue grant covering `tool_scope_violation`.
+      3. Issue `stasis kill` — the manual-kill path does NOT route
+         through `apply_grants` (it calls `request_termination` directly
+         in the SDK poller), so the kill lands.
+      4. Verify the agent died with trigger=manual, despite the active
+         grant still being in the DB.
+    """
+    _header(9, "manual kill bypasses grant")
+
+    import asyncio
+
+    from stasis_agent.client import StasisClient
+
+    print("  launching idle agent…")
+    agent_proc, agent_id = _launch_and_find_idle_agent()
+    _ok(f"idle agent registered, agent_id={agent_id}")
+
+    try:
+        op_key = "sk_dev_operator_local_only_do_not_ship"
+        op_env = {
+            **os.environ,
+            "STASIS_API_KEY": op_key,
+            "PYTHONIOENCODING": "utf-8",
+        }
+
+        # Step 1: issue the grant.
+        print("  issuing grant…")
+        grant_proc = subprocess.run(
+            [
+                "uv",
+                "run",
+                "stasis",
+                "grant",
+                agent_id,
+                "--symptoms",
+                "tool_scope_violation",
+                "--duration",
+                "1h",
+                "--reason",
+                "DoD step 9: grant that will be bypassed",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=op_env,
+            timeout=30.0,
+            check=False,
+        )
+        if grant_proc.returncode != 0:
+            print(grant_proc.stdout)
+            print(grant_proc.stderr, file=sys.stderr)
+            _fail(f"`stasis grant` exited {grant_proc.returncode}")
+        _ok("grant issued")
+
+        # Step 2: kill the agent. The grant must not save it.
+        print("  issuing manual kill (should bypass the grant)…")
+        kill_proc = subprocess.run(
+            [
+                "uv",
+                "run",
+                "stasis",
+                "kill",
+                agent_id,
+                "--reason",
+                "DoD step 9: manual override",
+                "--poll-interval",
+                "0.5",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=op_env,
+            timeout=120.0,
+            check=False,
+        )
+        if kill_proc.returncode != 0:
+            print(kill_proc.stdout)
+            print(kill_proc.stderr, file=sys.stderr)
+            _fail(f"`stasis kill` exited {kill_proc.returncode}")
+        if "confirmed dead" not in kill_proc.stdout:
+            _fail("`stasis kill` did not confirm death")
+        _ok("CLI reported confirmed dead despite active grant")
+
+        try:
+            agent_proc.wait(timeout=30.0)
+        except subprocess.TimeoutExpired:
+            agent_proc.kill()
+            _fail("idle agent did not exit within 30s after kill")
+        if agent_proc.returncode != 3:
+            _fail(
+                f"agent exited {agent_proc.returncode}, expected 3 "
+                f"(StasisTerminated)"
+            )
+        _ok("agent process exited 3")
+
+        # Step 3: verify the kill_event is manual + the grant is still
+        # there (not auto-revoked — grants survive their bypass).
+        async def _verify() -> None:
+            async with StasisClient.from_config() as client:
+                kills = await client.list_kill_events(agent_id)
+                if not kills:
+                    _fail("no kill_events found")
+                ke = kills[0]
+                if ke.trigger_type.value != "manual":
+                    _fail(
+                        f"trigger_type={ke.trigger_type.value} (expected manual)"
+                    )
+                _ok("kill_event.trigger_type = manual")
+                grants = await client.list_grants(agent_id)
+                if not grants:
+                    _fail("grant disappeared (shouldn't be auto-revoked)")
+                g = grants[0]
+                # The grant may still be ACTIVE (not revoked, not expired)
+                # — it just never had a chance to suppress anything because
+                # manual kill bypasses the apply_grants path. The fact that
+                # it's still here in the DB is the audit point.
+                _ok(f"grant still recorded id={g.id} active={g.active}")
+
+        asyncio.run(_verify())
+    finally:
+        if agent_proc.poll() is None:
+            agent_proc.kill()
+            agent_proc.wait(timeout=5.0)
+
+
 # --- helpers -------------------------------------------------------------
 
 
@@ -423,12 +729,16 @@ def main() -> None:
 
     if 7 not in skip:
         step_7_manual_kill()
+    if 8 not in skip:
+        step_8_grant()
+    if 9 not in skip:
+        step_9_manual_kill_bypasses_grant()
 
     print()
     print("=" * 70)
-    print("  DoD steps 1-4 + 7 PASSED.")
-    print("  Step 6 (feedback) shipped in M3 but isn't wired into this script yet;")
-    print("  steps 8-9 land in M5 (grants). Webhooks deferred.")
+    print("  DoD steps 1-4 + 7-9 PASSED.")
+    print("  Step 6 (feedback) shipped in M3 but isn't wired into this script yet.")
+    print("  Step 5 (webhooks) deferred post-MVP.")
     print("=" * 70)
 
 

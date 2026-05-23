@@ -39,6 +39,7 @@ from langchain_core.outputs import LLMResult
 from stasis_agent.checks import (
     Terminal,
     Warning,
+    apply_grants,
     check_tool_scope,
     run_all,
 )
@@ -69,11 +70,19 @@ def _apply_results(state: WatcherState, results: list[Terminal | Warning]) -> No
     overwritten. The death cert should show what *first* caused apoptosis,
     not what a follow-up check noticed afterwards.
 
+    **Grant application (M5):** before the flag-flip loop, run
+    `apply_grants(results, state.grants)` so Terminals covered by an
+    active grant are demoted to Warnings carrying `grant_id` in detail.
+    The Warning still flows through `record_symptom` for audit but
+    doesn't trip the apoptosis flag. Manual kill (M4) bypasses this
+    entirely — the poller calls `request_termination()` directly.
+
     The flag flip is just bookkeeping — the actual `StasisTerminated` raise
     happens at the next `_checkpoint` call (chain_start or tool_start). This
     is the L1 cooperative-termination contract: complete the current unit of
     work, abort at the next boundary.
     """
+    results = apply_grants(results, state.grants)
     for r in results:
         severity = "terminal" if isinstance(r, Terminal) else "warning"
         try:
