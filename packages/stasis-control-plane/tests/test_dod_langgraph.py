@@ -1,24 +1,14 @@
-"""M2.6 — DoD steps 1-4 end-to-end against live Postgres.
+"""LangGraph DoD — end-to-end apoptosis test via the LangGraph adapter.
 
-For each `--induce` mode the demo agent ships with (loop / cost /
-wall_clock / scope), this test:
+PAUSED: LangGraph integration is paused as of 2026-05-24. This test is kept
+for regression coverage; it is excluded from the default test run. To run:
 
-  1. Builds the misbehaving graph through `demo.coding_agent.agent.build_graph`
-  2. Runs it under `await watch(...)` against an in-process FastAPI app
-     (`httpx.ASGITransport`) backed by the live dev Postgres
-  3. Asserts the agent self-terminated cooperatively (`StasisTerminated`)
-  4. Queries `/agents/{id}/kill_events` and asserts:
-       * Exactly one kill_event was filed
-       * status = confirmed
-       * trigger_type = auto
-       * trigger_reason is non-empty
-       * the death certificate is present and non-empty
-       * the symptoms_log contains the expected symptom
-       * the agent row's status is now `terminated`
+    pytest -m legacy
 
-This is the test that proves M2 (the whole apoptosis path) works end-to-end.
-If this test passes, you can demo the 9-step DoD steps 1-4 by hand.
+When the LangGraph integration is un-paused and re-announced, this test
+becomes the primary DoD again and the @pytest.mark.legacy decorators are removed.
 
+Original scope: M2.6 DoD steps 1-4 end-to-end against live Postgres.
 NOTE: no `from __future__ import annotations` — see test_smoke.py for why.
 """
 
@@ -70,6 +60,7 @@ async def _clean_kill_events() -> Any:
 # Each parametrize tuple: (induce_mode, expected_symptom_in_log).
 # `expected_symptom_in_log` is the SymptomType.value the symptoms_log
 # must contain at least one entry for.
+@pytest.mark.legacy
 @pytest.mark.parametrize(
     ("induce_mode", "expected_symptom"),
     [
@@ -169,6 +160,7 @@ async def test_dod_induce_kills_and_writes_full_death_certificate(
         await client.aclose()
 
 
+@pytest.mark.legacy
 @pytest.mark.asyncio
 async def test_healthy_run_does_not_create_kill_event(
     cleanup_agents: list[str],
