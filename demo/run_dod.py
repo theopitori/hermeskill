@@ -49,6 +49,8 @@ import sys
 import time
 from pathlib import Path
 
+_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
+
 # Make stasis_agent + control_plane importable for the API-side queries
 # we do in step 4 (so we don't have to shell out for everything).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -332,10 +334,9 @@ def step_7_manual_kill() -> None:
         # Step 3: issue the kill. Use the operator key — developer key
         # would 403 here. Force UTF-8 on the child stdio so Rich's
         # `✓`/`…` glyphs don't crash on Windows' cp1252 default.
-        op_key = "sk_dev_operator_local_only_do_not_ship"
         kill_env = {
             **os.environ,
-            "STASIS_API_KEY": op_key,
+            "STASIS_API_KEY": _OPERATOR_KEY,
             "PYTHONIOENCODING": "utf-8",
         }
         print("  issuing `stasis kill`…")
@@ -453,10 +454,9 @@ def step_8_grant() -> None:
 
     try:
         # Step 1: issue the grant via the CLI.
-        op_key = "sk_dev_operator_local_only_do_not_ship"
         grant_env = {
             **os.environ,
-            "STASIS_API_KEY": op_key,
+            "STASIS_API_KEY": _OPERATOR_KEY,
             "PYTHONIOENCODING": "utf-8",
         }
         print("  issuing `stasis grant`…")
@@ -551,10 +551,9 @@ def step_9_manual_kill_bypasses_grant() -> None:
     _ok(f"idle agent registered, agent_id={agent_id}")
 
     try:
-        op_key = "sk_dev_operator_local_only_do_not_ship"
         op_env = {
             **os.environ,
-            "STASIS_API_KEY": op_key,
+            "STASIS_API_KEY": _OPERATOR_KEY,
             "PYTHONIOENCODING": "utf-8",
         }
 

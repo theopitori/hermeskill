@@ -14,11 +14,9 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from _keys import DEV_HEADERS
 from httpx import AsyncClient
 from sqlalchemy import text
-
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
-DEV_HEADERS = {"Authorization": f"Bearer {DEV_DEVELOPER_KEY}"}
 
 
 async def _register_agent(client: AsyncClient, name: str) -> str:

@@ -19,6 +19,11 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+# Make the tests directory importable so test files can `from _keys import ...`.
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
 # Make the top-level `demo/` package importable from tests.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
@@ -52,5 +57,6 @@ async def cleanup_agents() -> AsyncIterator[list[str]]:
             await session.commit()
 
 
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
-DEV_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
+from _keys import DEV_DEVELOPER_KEY, DEV_HEADERS, DEV_OPERATOR_KEY, OP_HEADERS  # noqa: E402
+
+__all__ = ["DEV_DEVELOPER_KEY", "DEV_HEADERS", "DEV_OPERATOR_KEY", "OP_HEADERS"]
