@@ -69,6 +69,83 @@ top_router = APIRouter(prefix="/kill_events", tags=["kill_events"])
 kills_router = APIRouter(prefix="/kills", tags=["kill_events"])
 
 
+async def _existing_active_kill_event(
+    session: AsyncSession, agent_id: UUID
+) -> KillEvent | None:
+    """Return the active (INITIATED or CONFIRMED) kill_event for this agent, or None."""
+    stmt = select(KillEvent).where(
+        KillEvent.agent_id == agent_id,
+        KillEvent.status.in_([KillEventStatus.INITIATED, KillEventStatus.CONFIRMED]),
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+def _build_or_update_kill_event(
+    session: AsyncSession,
+    payload: KillEventIn,
+    agent_id: UUID,
+    existing: KillEvent | None,
+    cert_dump: dict[str, object],
+    shutdown_dump: list[dict[str, object]],
+) -> KillEvent:
+    """INSERT a new kill_event or UPDATE the existing INITIATED row.
+
+    cert_dump must already contain `feedback_url` — the caller sets it
+    before this call to avoid the SQLAlchemy JSONB in-place-mutation trap.
+    """
+    if existing is not None:
+        existing.terminated_at = payload.terminated_at
+        existing.death_certificate = cert_dump
+        existing.shutdown_log = shutdown_dump
+        existing.status = KillEventStatus.CONFIRMED
+        return existing
+    kill_event = KillEvent(
+        agent_id=agent_id,
+        trigger_type=payload.trigger_type,
+        trigger_reason=payload.trigger_reason,
+        triggered_at=payload.triggered_at,
+        terminated_at=payload.terminated_at,
+        status=KillEventStatus.CONFIRMED,
+        death_certificate=cert_dump,
+        shutdown_log=shutdown_dump,
+    )
+    session.add(kill_event)
+    return kill_event
+
+
+def _add_feedback_token(
+    session: AsyncSession, kill_event_id: int, token_hash: str
+) -> None:
+    """Attach a feedback token row to a freshly flushed kill_event."""
+    session.add(
+        FeedbackToken(
+            token_hash=token_hash,
+            kill_event_id=kill_event_id,
+            expires_at=datetime.now(UTC)
+            + timedelta(days=settings.feedback_token_ttl_days),
+        )
+    )
+
+
+async def _409_for_active_kill(
+    session: AsyncSession, agent_id: UUID
+) -> HTTPException:
+    """Build a 409 after an IntegrityError on kill_events or feedback_tokens.
+
+    Two callers: partial unique index on kill_events (symptom vs manual
+    race) and unique on feedback_tokens.kill_event_id (token double-issue).
+    Both surfaces the existing active kill_event id so the SDK can correlate.
+    """
+    winner = await _existing_active_kill_event(session, agent_id)
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "detail": "agent kill_event already in flight",
+            "existing_kill_event_id": winner.id if winner else None,
+        },
+    )
+
+
 @router.post(
     "/{agent_id}/kill_events",
     status_code=status.HTTP_201_CREATED,
@@ -104,19 +181,9 @@ async def create_kill_event(
     this returns, `GET /agents/{id}` shows the agent as terminated.
     """
     agent = await _load_agent_owned_by(session, agent_id, principal.customer_id)
-
-    # Look for an existing active kill_event. The partial unique index
-    # guarantees at most one — `scalar_one_or_none` is correct here.
-    existing_stmt = select(KillEvent).where(
-        KillEvent.agent_id == agent_id,
-        KillEvent.status.in_([KillEventStatus.INITIATED, KillEventStatus.CONFIRMED]),
-    )
-    existing = (await session.execute(existing_stmt)).scalar_one_or_none()
+    existing = await _existing_active_kill_event(session, agent_id)
 
     if existing is not None and existing.status == KillEventStatus.CONFIRMED:
-        # Already finalized — second post is a no-op for the writer but
-        # we surface the conflict explicitly so callers don't double-bill
-        # and (when they land) don't double-deliver webhooks.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -128,74 +195,25 @@ async def create_kill_event(
     cert_dump = payload.death_certificate.model_dump(mode="json")
     shutdown_dump = [e.model_dump(mode="json") for e in payload.shutdown_log]
 
-    # Mint the feedback token up front. The token's raw form goes into
-    # the cert JSONB as `feedback_url`; the hash goes into the
-    # feedback_tokens row below once we have a kill_event.id from flush.
-    # Injecting the URL pre-INSERT/pre-UPDATE means the JSONB write is a
-    # single assignment SQLAlchemy detects as dirty — mutating the dict
-    # after flush wouldn't be tracked.
+    # Inject the feedback URL into cert_dump BEFORE passing it to the
+    # builder — SQLAlchemy won't detect mutations to an already-assigned
+    # JSONB column dict.
     raw_token, token_hash = generate_feedback_token()
-    cert_dump["feedback_url"] = build_feedback_url(
-        settings.feedback_base_url, raw_token
+    cert_dump["feedback_url"] = build_feedback_url(settings.feedback_base_url, raw_token)
+
+    kill_event = _build_or_update_kill_event(
+        session, payload, agent_id, existing, cert_dump, shutdown_dump
     )
-
-    if existing is not None:
-        # Update the manual-initiated row with the SDK's cert + shutdown log.
-        existing.terminated_at = payload.terminated_at
-        existing.death_certificate = cert_dump
-        existing.shutdown_log = shutdown_dump
-        existing.status = KillEventStatus.CONFIRMED
-        kill_event = existing
-    else:
-        kill_event = KillEvent(
-            agent_id=agent_id,
-            trigger_type=payload.trigger_type,
-            trigger_reason=payload.trigger_reason,
-            triggered_at=payload.triggered_at,
-            terminated_at=payload.terminated_at,
-            status=KillEventStatus.CONFIRMED,
-            death_certificate=cert_dump,
-            shutdown_log=shutdown_dump,
-        )
-        session.add(kill_event)
-
-    # Flip the agent over to TERMINATED so the fleet view + CLI reflect
-    # the death immediately, without waiting for the heartbeat sweeper.
     agent.status = AgentStatus.TERMINATED
     agent.terminated_at = payload.terminated_at
 
     try:
-        # Flush to assign kill_event.id (INSERT path), then attach the
-        # feedback_tokens row. Single transaction so a token never exists
-        # without its cert.
         await session.flush()
-        session.add(
-            FeedbackToken(
-                token_hash=token_hash,
-                kill_event_id=kill_event.id,
-                expires_at=datetime.now(UTC)
-                + timedelta(days=settings.feedback_token_ttl_days),
-            )
-        )
+        _add_feedback_token(session, kill_event.id, token_hash)
         await session.commit()
     except IntegrityError as exc:
-        # Two ways to land here:
-        #   1. partial unique index on kill_events (symptom vs manual race)
-        #   2. unique on feedback_tokens.kill_event_id (token double-issue —
-        #      shouldn't happen because the only paths that issue a token
-        #      are INSERT and INITIATED→CONFIRMED, but the DB-side guard
-        #      keeps the invariant honest)
-        # In both cases the response is the same: 409 with the existing
-        # active kill_event id so the SDK can correlate.
         await session.rollback()
-        winner = (await session.execute(existing_stmt)).scalar_one_or_none()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "detail": "agent kill_event already in flight",
-                "existing_kill_event_id": winner.id if winner else None,
-            },
-        ) from exc
+        raise await _409_for_active_kill(session, agent_id) from exc
 
     await session.refresh(kill_event)
     response.status_code = status.HTTP_201_CREATED
