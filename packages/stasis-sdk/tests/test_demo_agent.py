@@ -18,20 +18,11 @@ import httpx
 import pytest
 from stasis_agent import watch
 from stasis_agent.client import StasisClient
-from stasis_agent.watcher import BackgroundWorker, _reset_registry_for_tests, all_watchers
+from stasis_agent.watcher import BackgroundWorker, all_watchers
 
 # Make the demo importable as a module (it lives outside any package).
 DEMO_PARENT = Path(__file__).resolve().parents[3] / "demo"
 sys.path.insert(0, str(DEMO_PARENT.parent))
-
-
-@pytest.fixture(autouse=True)
-def _isolate() -> Any:
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
-    yield
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
 
 
 def _mock_client(calls: list[dict[str, Any]]) -> StasisClient:

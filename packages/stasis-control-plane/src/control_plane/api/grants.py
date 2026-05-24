@@ -87,7 +87,7 @@ async def create_grant(
 
     if SymptomType.MANUAL_KILL in payload.symptoms:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="manual_kill is never grantable",
         )
 
@@ -95,7 +95,7 @@ async def create_grant(
         policy = resolve_policy(agent.policy_name)
     except UnknownPolicyError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"cannot validate grant: unknown policy {agent.policy_name!r}. "
                 "Custom server-side policies are not yet supported."
@@ -107,7 +107,7 @@ async def create_grant(
     disallowed = requested - allowed
     if disallowed:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"policy {agent.policy_name!r} does not allow grants for: "
                 f"{sorted(s.value for s in disallowed)}. "
@@ -119,7 +119,7 @@ async def create_grant(
         # Pydantic already enforces this on the wire; re-asserted so a
         # bypassed validator can't slip through.
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"duration_seconds exceeds the {MAX_DURATION_SECONDS}s hard cap",
         )
 

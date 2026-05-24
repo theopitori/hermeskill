@@ -13,26 +13,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from _helpers import _register_agent
+from _keys import DEV_HEADERS, OP_HEADERS
 from httpx import AsyncClient
 from sqlalchemy import text
-
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
-DEV_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
-DEV_HEADERS = {"Authorization": f"Bearer {DEV_DEVELOPER_KEY}"}
-OP_HEADERS = {"Authorization": f"Bearer {DEV_OPERATOR_KEY}"}
-
-
-async def _register_agent(
-    client: AsyncClient, name: str, policy: str = "coding-default"
-) -> str:
-    r = await client.post(
-        "/agents",
-        json={"name": name, "policy_name": policy},
-        headers=DEV_HEADERS,
-    )
-    assert r.status_code == 201, r.text
-    return str(r.json()["agent_id"])
-
 
 # --- POST /agents/{id}/grants --------------------------------------------
 

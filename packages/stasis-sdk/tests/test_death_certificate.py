@@ -33,19 +33,7 @@ from stasis_agent.types import SymptomType, TriggerType
 from stasis_agent.watcher import (
     BackgroundWorker,
     WatcherState,
-    _reset_registry_for_tests,
 )
-
-# --- fixtures ------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _isolate_registry_and_worker() -> Any:
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
-    yield
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
 
 
 def _state() -> WatcherState:

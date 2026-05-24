@@ -43,17 +43,48 @@ the demo is also a piece of documentation.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
+
+_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
 
 # Make stasis_agent + control_plane importable for the API-side queries
 # we do in step 4 (so we don't have to shell out for everything).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+# stasis_agent is available via the venv managed by `uv run`.
+from stasis_agent.client import StasisClient  # noqa: E402
+
+# --- operator helpers ----------------------------------------------------
+
+
+def _op_env() -> dict[str, str]:
+    """Env dict for operator CLI calls: injects operator key + UTF-8 stdio."""
+    return {**os.environ, "STASIS_API_KEY": _OPERATOR_KEY, "PYTHONIOENCODING": "utf-8"}
+
+
+def _run_stasis_cli(
+    *args: str, timeout: float = 30.0
+) -> subprocess.CompletedProcess[str]:
+    """Run `uv run stasis <args>` with the operator env and capture output."""
+    return subprocess.run(
+        ["uv", "run", "stasis", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_op_env(),
+        timeout=timeout,
+        check=False,
+    )
+
 
 # --- pretty printing -----------------------------------------------------
 
@@ -175,9 +206,6 @@ def step_4_death_certificate(agent_id: str) -> None:
     _header(4, "death certificate — cert lands on the control plane")
     # Use the SDK client directly rather than CLI (the CLI for death cert
     # arrives in M6; for now the API is the source of truth).
-    import asyncio
-
-    from stasis_agent.client import StasisClient
 
     async def _check() -> None:
         client = StasisClient.from_config()
@@ -222,11 +250,6 @@ def _launch_and_find_idle_agent() -> tuple[subprocess.Popen[str], str]:
     row in the DB. Filtering by `registered_at >= launch_time` makes
     sure we attach to *this* subprocess, not a ghost from a previous one.
     """
-    import asyncio
-    from datetime import UTC, datetime
-
-    from stasis_agent.client import StasisClient
-
     # Anchor *before* spawning so a fast-registering agent can't slip
     # under the cutoff. `replace(microsecond=0)` truncates down → moves
     # `launch_time` up to 999ms earlier than wall-clock, which is the
@@ -278,86 +301,28 @@ def step_7_manual_kill() -> None:
     and the cert records the operator + reason.
 
     Flow:
-      1. Launch the idle demo agent in the background.
-      2. Poll the fleet until it registers; capture its id.
-      3. Run `stasis kill <id> --reason "..."` with the operator key.
-      4. Wait for the agent process to exit (cooperative — exit code 3).
-      5. Read the kill_event and verify trigger_type=manual + operator_reason.
+      1. Launch the idle demo agent via _launch_and_find_idle_agent (which
+         filters by registered_at >= launch_time — avoids matching a ghost
+         row left by a SIGKILL'd agent from a previous step).
+      2. Run `stasis kill <id> --reason "..."` with the operator key.
+      3. Wait for the agent process to exit (cooperative — exit code 3).
+      4. Read the kill_event and verify trigger_type=manual + operator_reason.
     """
     _header(7, "manual kill — operator-issued cooperative termination")
 
-    import asyncio
-    import re as _re
-
-    from stasis_agent.client import StasisClient
-
-    # Step 1: launch idle agent in the background. We bypass _run because
-    # it waits for completion; here we need the process alive.
     print("  launching idle agent…")
-    agent_proc = subprocess.Popen(
-        ["uv", "run", "python", "demo/coding_agent/agent.py", "--idle"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    agent_proc, agent_id = _launch_and_find_idle_agent()
+    _ok(f"idle agent registered, agent_id={agent_id}")
 
-    agent_id: str | None = None
     try:
-        # Step 2: wait for the agent to register. The agent prints
-        # `tip: uv run stasis logs <id>` on exit, but for kill-mid-run we
-        # need to find it earlier — poll the fleet for a `demo-coding-bot-idle`
-        # entry. Cap at 30s.
-        async def _find_agent() -> str:
-            async with StasisClient.from_config() as client:
-                for _ in range(60):
-                    fleet = await client.list_agents()
-                    matches = [
-                        a
-                        for a in fleet
-                        if a.name == "demo-coding-bot-idle"
-                        and a.status.value != "terminated"
-                    ]
-                    if matches:
-                        # The newest is at the front (registered_at desc).
-                        return str(matches[0].id)
-                    await asyncio.sleep(0.5)
-                _fail("idle agent did not register within 30s")
-                return ""  # unreachable; satisfies type checker
-
-        agent_id = asyncio.run(_find_agent())
-        _ok(f"idle agent registered, agent_id={agent_id}")
-
-        # Step 3: issue the kill. Use the operator key — developer key
-        # would 403 here. Force UTF-8 on the child stdio so Rich's
-        # `✓`/`…` glyphs don't crash on Windows' cp1252 default.
-        op_key = "sk_dev_operator_local_only_do_not_ship"
-        kill_env = {
-            **os.environ,
-            "STASIS_API_KEY": op_key,
-            "PYTHONIOENCODING": "utf-8",
-        }
+        # Issue the kill. _run_stasis_cli injects the operator key and UTF-8
+        # stdio so Rich glyphs don't crash on Windows cp1252.
         print("  issuing `stasis kill`…")
-        kill_proc = subprocess.run(
-            [
-                "uv",
-                "run",
-                "stasis",
-                "kill",
-                agent_id,
-                "--reason",
-                "DoD step 7: manual kill demo",
-                "--poll-interval",
-                "0.5",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=kill_env,
+        kill_proc = _run_stasis_cli(
+            "kill", agent_id,
+            "--reason", "DoD step 7: manual kill demo",
+            "--poll-interval", "0.5",
             timeout=120.0,
-            check=False,
         )
         if kill_proc.returncode != 0:
             print(kill_proc.stdout)
@@ -367,7 +332,7 @@ def step_7_manual_kill() -> None:
             _fail("`stasis kill` did not confirm death")
         _ok("CLI reported confirmed dead")
 
-        # Step 4: the agent process should exit on its own with code 3
+        # The agent process should exit on its own with code 3
         # once StasisTerminated bubbles up.
         try:
             agent_proc.wait(timeout=30.0)
@@ -381,7 +346,7 @@ def step_7_manual_kill() -> None:
             )
         _ok("agent process exited 3 (StasisTerminated)")
 
-        # Step 5: verify the kill_event carries operator context.
+        # Verify the kill_event carries operator context.
         async def _verify_cert() -> None:
             async with StasisClient.from_config() as client:
                 kills = await client.list_kill_events(agent_id)
@@ -406,9 +371,6 @@ def step_7_manual_kill() -> None:
                 _ok(f"  operator_reason: {ke.operator_reason}")
                 _ok(f"  cert.operator:   {cert.operator}")
 
-        # _re used below if we ever need to parse the CLI output; silence
-        # the import-but-unused lint.
-        _ = _re
         asyncio.run(_verify_cert())
 
     finally:
@@ -443,44 +405,18 @@ def step_8_grant() -> None:
     """
     _header(8, "grant — operator issues apoptosis-proofing")
 
-    import asyncio
-
-    from stasis_agent.client import StasisClient
-
     print("  launching idle agent…")
     agent_proc, agent_id = _launch_and_find_idle_agent()
     _ok(f"idle agent registered, agent_id={agent_id}")
 
     try:
         # Step 1: issue the grant via the CLI.
-        op_key = "sk_dev_operator_local_only_do_not_ship"
-        grant_env = {
-            **os.environ,
-            "STASIS_API_KEY": op_key,
-            "PYTHONIOENCODING": "utf-8",
-        }
         print("  issuing `stasis grant`…")
-        grant_proc = subprocess.run(
-            [
-                "uv",
-                "run",
-                "stasis",
-                "grant",
-                agent_id,
-                "--symptoms",
-                "tool_scope_violation",
-                "--duration",
-                "1h",
-                "--reason",
-                "DoD step 8: operator exploring a new tool",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=grant_env,
-            timeout=30.0,
-            check=False,
+        grant_proc = _run_stasis_cli(
+            "grant", agent_id,
+            "--symptoms", "tool_scope_violation",
+            "--duration", "1h",
+            "--reason", "DoD step 8: operator exploring a new tool",
         )
         if grant_proc.returncode != 0:
             print(grant_proc.stdout)
@@ -542,45 +478,18 @@ def step_9_manual_kill_bypasses_grant() -> None:
     """
     _header(9, "manual kill bypasses grant")
 
-    import asyncio
-
-    from stasis_agent.client import StasisClient
-
     print("  launching idle agent…")
     agent_proc, agent_id = _launch_and_find_idle_agent()
     _ok(f"idle agent registered, agent_id={agent_id}")
 
     try:
-        op_key = "sk_dev_operator_local_only_do_not_ship"
-        op_env = {
-            **os.environ,
-            "STASIS_API_KEY": op_key,
-            "PYTHONIOENCODING": "utf-8",
-        }
-
         # Step 1: issue the grant.
         print("  issuing grant…")
-        grant_proc = subprocess.run(
-            [
-                "uv",
-                "run",
-                "stasis",
-                "grant",
-                agent_id,
-                "--symptoms",
-                "tool_scope_violation",
-                "--duration",
-                "1h",
-                "--reason",
-                "DoD step 9: grant that will be bypassed",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=op_env,
-            timeout=30.0,
-            check=False,
+        grant_proc = _run_stasis_cli(
+            "grant", agent_id,
+            "--symptoms", "tool_scope_violation",
+            "--duration", "1h",
+            "--reason", "DoD step 9: grant that will be bypassed",
         )
         if grant_proc.returncode != 0:
             print(grant_proc.stdout)
@@ -590,25 +499,11 @@ def step_9_manual_kill_bypasses_grant() -> None:
 
         # Step 2: kill the agent. The grant must not save it.
         print("  issuing manual kill (should bypass the grant)…")
-        kill_proc = subprocess.run(
-            [
-                "uv",
-                "run",
-                "stasis",
-                "kill",
-                agent_id,
-                "--reason",
-                "DoD step 9: manual override",
-                "--poll-interval",
-                "0.5",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=op_env,
+        kill_proc = _run_stasis_cli(
+            "kill", agent_id,
+            "--reason", "DoD step 9: manual override",
+            "--poll-interval", "0.5",
             timeout=120.0,
-            check=False,
         )
         if kill_proc.returncode != 0:
             print(kill_proc.stdout)

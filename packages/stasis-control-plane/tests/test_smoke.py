@@ -10,11 +10,10 @@ locally-imported types.
 from typing import Annotated
 
 import pytest
+from _keys import DEV_DEVELOPER_KEY
 from control_plane.auth import Principal, require_principal
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
-
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
 
 
 @pytest.mark.asyncio
