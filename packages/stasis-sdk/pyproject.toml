@@ -1,7 +1,7 @@
 [project]
 name = "stasis-agent"
 version = "0.1.0a0"
-description = "Stasis SDK — Watcher, Executioner client, and CLI for agent supervision"
+description = "Stasis SDK — apoptosis protocol core: watcher state, symptom checks, death certificates, and control-plane client"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -11,6 +11,10 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "tomli>=2.0; python_version<'3.11'",
+]
+
+[project.optional-dependencies]
+langgraph = [
     "langchain-core>=0.3",
     "langgraph>=0.2",
 ]

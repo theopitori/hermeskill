@@ -1,19 +1,20 @@
-"""Stasis SDK — agent supervision via the apoptosis protocol.
+"""Stasis SDK — apoptosis protocol core for AI agent supervision.
 
-Public API:
+Framework-agnostic core: WatcherState, symptom checks, death certificates,
+kill-event client, operator CLI. Install a framework adapter on top:
 
-    from stasis_agent import watch, StasisTerminated
+    pip install stasis-hermes         # Hermes Agent plugin
+    # stasis-agent[langgraph]         # LangGraph adapter (coming soon)
 
-    async def main():
-        graph = await watch(my_graph, name="coding-bot-v1", policy="coding-default")
-        await graph.ainvoke({"task": "fix the bug"})
+Public exceptions:
 
-`watch()` registers the agent with the control plane, attaches the supervisor
-callback, and starts the shared per-process background worker that handles
-heartbeats and event flushing.
+    from stasis_agent import StasisTerminated
 
-`checkpoint()` (M2) is for non-LangGraph custom loops; drops into your loop
-between long-running steps as a synchronous "should I die?" probe.
+    # Raised by framework adapters when the agent is killed by Stasis.
+    # Catch at your top-level run loop if you need cleanup before exit.
+
+`checkpoint()` is a cooperative termination point for custom loops;
+raises StasisTerminated if a kill directive is pending.
 """
 
 from stasis_agent._version import __version__
