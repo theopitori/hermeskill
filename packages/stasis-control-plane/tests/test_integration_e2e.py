@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import DEV_DEVELOPER_KEY
 from control_plane.main import app
 from sqlalchemy import text
 from stasis_agent import watch
@@ -28,8 +29,6 @@ from stasis_agent.watcher import (
     BackgroundWorker,
     _reset_registry_for_tests,
 )
-
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
 
 
 @pytest.fixture(autouse=True)

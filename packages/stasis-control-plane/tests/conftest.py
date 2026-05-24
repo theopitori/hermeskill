@@ -24,6 +24,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# Make `from conftest import ...` work in `--import-mode=importlib`.
+# Without this, sibling test files can't pull in the shared dev-key
+# constants below.
+_TESTS_DIR = str(Path(__file__).resolve().parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
+
 
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[AsyncClient]:
@@ -52,5 +59,10 @@ async def cleanup_agents() -> AsyncIterator[list[str]]:
             await session.commit()
 
 
+# Dev keys mirror the migration seed
+# (packages/stasis-control-plane/migrations/versions/0001_initial_schema.py).
+# Test files import these instead of redefining them per-file.
 DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
 DEV_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
+DEV_HEADERS = {"Authorization": f"Bearer {DEV_DEVELOPER_KEY}"}
+OP_HEADERS = {"Authorization": f"Bearer {DEV_OPERATOR_KEY}"}

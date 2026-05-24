@@ -7,11 +7,8 @@ NOTE: no `from __future__ import annotations` — see test_smoke.py for why.
 """
 
 import pytest
+from conftest import DEV_HEADERS
 from httpx import AsyncClient
-
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
-DEV_HEADERS = {"Authorization": f"Bearer {DEV_DEVELOPER_KEY}"}
-
 
 # --- registration + fleet -------------------------------------------------
 

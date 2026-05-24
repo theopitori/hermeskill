@@ -42,7 +42,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
+from conftest import DEV_DEVELOPER_KEY  # noqa: E402  (sys.path mutated above)
 
 
 @pytest.fixture(autouse=True)

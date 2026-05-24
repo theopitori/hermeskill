@@ -55,6 +55,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# Dev operator key (steps 7-9) — mirror of the migration seed
+# (packages/stasis-control-plane/migrations/versions/0001_initial_schema.py).
+# Kept literal here rather than imported so the demo runs without the
+# control-plane package on the import path.
+_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
+
 # --- pretty printing -----------------------------------------------------
 
 
@@ -332,10 +338,9 @@ def step_7_manual_kill() -> None:
         # Step 3: issue the kill. Use the operator key — developer key
         # would 403 here. Force UTF-8 on the child stdio so Rich's
         # `✓`/`…` glyphs don't crash on Windows' cp1252 default.
-        op_key = "sk_dev_operator_local_only_do_not_ship"
         kill_env = {
             **os.environ,
-            "STASIS_API_KEY": op_key,
+            "STASIS_API_KEY": _OPERATOR_KEY,
             "PYTHONIOENCODING": "utf-8",
         }
         print("  issuing `stasis kill`…")
@@ -453,10 +458,9 @@ def step_8_grant() -> None:
 
     try:
         # Step 1: issue the grant via the CLI.
-        op_key = "sk_dev_operator_local_only_do_not_ship"
         grant_env = {
             **os.environ,
-            "STASIS_API_KEY": op_key,
+            "STASIS_API_KEY": _OPERATOR_KEY,
             "PYTHONIOENCODING": "utf-8",
         }
         print("  issuing `stasis grant`…")
@@ -551,10 +555,9 @@ def step_9_manual_kill_bypasses_grant() -> None:
     _ok(f"idle agent registered, agent_id={agent_id}")
 
     try:
-        op_key = "sk_dev_operator_local_only_do_not_ship"
         op_env = {
             **os.environ,
-            "STASIS_API_KEY": op_key,
+            "STASIS_API_KEY": _OPERATOR_KEY,
             "PYTHONIOENCODING": "utf-8",
         }
 
