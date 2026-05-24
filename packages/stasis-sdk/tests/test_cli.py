@@ -12,6 +12,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import stasis_agent.cli as cli_mod
+import stasis_agent.cli_helpers as cli_helpers_mod
 from rich.console import Console
 from stasis_agent.cli import app
 from stasis_agent.client import StasisClient
@@ -40,7 +41,9 @@ def _patch_from_config(monkeypatch: pytest.MonkeyPatch) -> Any:
     contents like "coding-default" fail because Rich renders "cod…".
     """
     cli_mod._handler = None  # type: ignore[attr-defined]
-    monkeypatch.setattr(cli_mod, "console", Console(width=200))
+    wide = Console(width=200)
+    monkeypatch.setattr(cli_mod, "console", wide)
+    monkeypatch.setattr(cli_helpers_mod, "console", wide)
 
     def fake(*args: Any, **kwargs: Any) -> StasisClient:
         handler = cli_mod._handler  # type: ignore[attr-defined]
