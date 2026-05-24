@@ -32,6 +32,9 @@ def _client_with(handler: Any) -> StasisClient:
 def _patch_from_config(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Each test installs its own handler by setting `_handler` on the module.
 
+    `_handler` is a test-only injection point that does not exist on the real
+    module; the # type: ignore[attr-defined] suppressions below are intentional.
+
     Also forces a wide Rich console so table cells don't get truncated by
     CliRunner's narrow default terminal width — otherwise assertions on cell
     contents like "coding-default" fail because Rich renders "cod…".
