@@ -17,23 +17,12 @@ from stasis_agent.types import EventType
 from stasis_agent.watcher import (
     BackgroundWorker,
     WatcherState,
-    _reset_registry_for_tests,
     all_watchers,
     ensure_worker_started,
     get_watcher,
     register_watcher,
     unregister_watcher,
 )
-
-
-@pytest.fixture(autouse=True)
-def _isolate_registry_and_worker() -> Any:
-    """Each test gets a clean registry and no leftover worker singleton."""
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
-    yield
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
 
 
 def _make_state(name: str = "test") -> WatcherState:

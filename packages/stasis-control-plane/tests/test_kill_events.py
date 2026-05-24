@@ -6,64 +6,14 @@ agent through the conftest cleanup fixture so rows clean themselves up.
 NOTE: no `from __future__ import annotations` — see test_smoke.py for why.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import pytest
+from _helpers import _register_agent, _sample_payload
 from _keys import DEV_HEADERS
 from httpx import AsyncClient
 from sqlalchemy import text
-
-
-async def _register_agent(client: AsyncClient, name: str) -> str:
-    r = await client.post(
-        "/agents",
-        json={"name": name, "policy_name": "coding-default"},
-        headers=DEV_HEADERS,
-    )
-    assert r.status_code == 201, r.text
-    return str(r.json()["agent_id"])
-
-
-def _sample_payload(agent_id: str, reason: str = "loop_detected") -> dict[str, Any]:
-    """Minimal-but-complete kill_event POST body."""
-    now = datetime.now(UTC)
-    return {
-        "trigger_type": "auto",
-        "trigger_reason": reason,
-        "triggered_at": now.isoformat(),
-        "terminated_at": now.isoformat(),
-        "death_certificate": {
-            "agent_id": agent_id,
-            "triggered_at": now.isoformat(),
-            "terminated_at": now.isoformat(),
-            "trigger_type": "auto",
-            "trigger_reason": reason,
-            "symptoms_log": [
-                {
-                    "symptom": "loop",
-                    "severity": "terminal",
-                    "reason": reason,
-                    "detail": {"count": 5},
-                    "at": now.isoformat(),
-                }
-            ],
-            "final_state": {},
-            "shutdown_log": [],
-            "operator": None,
-            "operator_reason": None,
-        },
-        "shutdown_log": [
-            {
-                "step": "apoptosis_requested",
-                "at": now.isoformat(),
-                "duration_ms": 0.5,
-                "detail": {},
-            }
-        ],
-    }
-
 
 # --- POST happy path -----------------------------------------------------
 

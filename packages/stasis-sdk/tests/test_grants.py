@@ -13,20 +13,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-import pytest
 from stasis_agent.apoptosis import build_death_certificate
 from stasis_agent.checks import Terminal, Warning, apply_grants
 from stasis_agent.langchain import _apply_results
 from stasis_agent.policies import resolve_policy
 from stasis_agent.types import SymptomType, TriggerType
-from stasis_agent.watcher import WatcherState, _reset_registry_for_tests
-
-
-@pytest.fixture(autouse=True)
-def _isolate() -> Any:
-    _reset_registry_for_tests()
-    yield
-    _reset_registry_for_tests()
+from stasis_agent.watcher import WatcherState
 
 
 def _state() -> WatcherState:

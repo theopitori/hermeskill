@@ -18,24 +18,11 @@ from stasis_agent.client import StasisClient
 from stasis_agent.policies import resolve_policy
 from stasis_agent.types import TriggerType
 from stasis_agent.watcher import (
-    BackgroundWorker,
     KillPendingPoller,
     WatcherState,
-    _reset_registry_for_tests,
     ensure_kill_poller_started,
     register_watcher,
 )
-
-
-@pytest.fixture(autouse=True)
-def _isolate_registry_and_workers() -> Any:
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
-    KillPendingPoller._instance = None
-    yield
-    _reset_registry_for_tests()
-    BackgroundWorker._instance = None
-    KillPendingPoller._instance = None
 
 
 def _state(agent_id: UUID | None = None) -> WatcherState:
