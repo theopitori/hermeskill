@@ -2,6 +2,15 @@
 
 Patches StasisClient.from_config to return a mock-transport-backed client so
 no live server is needed.
+
+Note on `cli_mod._handler` and the `# type: ignore[attr-defined]` markers:
+the `_handler` attribute does NOT exist on the real `cli` module — it is
+test-only state injected by `_patch_from_config` and consumed by the
+patched `from_config`. Each test installs its own httpx handler via
+`_set_handler`. The suppressions are load-bearing; removing them would
+require either declaring `_handler` in the source module (leaking test
+infrastructure into production) or introducing a Protocol shim purely
+to satisfy the type checker for one test pattern. Neither is a net win.
 """
 
 import json as _json

@@ -325,8 +325,9 @@ def _normalize_step(raw: dict[str, object]) -> ShutdownLogEntry:
     else:
         at = datetime.now(UTC)
     duration_raw = raw.get("duration_ms")
+    # raw is dict[str, object]; narrow to a coercible numeric/str type before float().
     duration_ms: float | None = (
-        None if duration_raw is None else float(duration_raw)  # type: ignore[arg-type]
+        float(duration_raw) if isinstance(duration_raw, (int, float, str)) else None
     )
     detail = raw.get("detail") or {}
     if not isinstance(detail, dict):

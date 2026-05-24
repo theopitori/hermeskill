@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from collections.abc import Coroutine
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -71,10 +73,10 @@ def main(
 # --- shared error handling ----------------------------------------------
 
 
-def _run(coro: object) -> None:
+def _run(coro: Coroutine[Any, Any, None]) -> None:
     """Run an async CLI body and translate SDK exceptions into clean CLI errors."""
     try:
-        asyncio.run(coro)  # type: ignore[arg-type]
+        asyncio.run(coro)
     except AuthError as exc:
         err_console.print(f"[red]auth error:[/red] {exc}")
         err_console.print(
