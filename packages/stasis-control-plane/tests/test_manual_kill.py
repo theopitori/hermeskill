@@ -218,7 +218,7 @@ async def _clean_kill_events() -> Any:
 
 
 def test_router_imports_smoke() -> None:
-    from control_plane.api.kill_events import kills_router, router
+    from control_plane.api.manual_kill import kills_router, router
 
     # Each router exposes the expected routes.
     paths = {r.path for r in router.routes}
