@@ -21,6 +21,7 @@ from control_plane.api import feedback as feedback_router
 from control_plane.api import grants as grants_router
 from control_plane.api import heartbeats as heartbeats_router
 from control_plane.api import kill_events as kill_events_router
+from control_plane.api import manual_kill as manual_kill_router
 from control_plane.db.session import engine
 from control_plane.settings import settings
 
@@ -43,11 +44,12 @@ def create_app() -> FastAPI:
     app.include_router(agents_router.router)
     app.include_router(heartbeats_router.router)
     app.include_router(events_router.router)
-    # M2.5 — kill_events has nested (POST/list under /agents/{id}),
-    # top-level (GET single by id), and the M4 /kills/* batch router.
+    # M2.5 — kill_events has nested (POST/list under /agents/{id}) and
+    # top-level (GET single by id). M4 manual-kill routes live in manual_kill.
     app.include_router(kill_events_router.router)
     app.include_router(kill_events_router.top_router)
-    app.include_router(kill_events_router.kills_router)
+    app.include_router(manual_kill_router.router)
+    app.include_router(manual_kill_router.kills_router)
     # M3 — unauthenticated one-click feedback. Mounted last so its routes
     # are unambiguous even though the prefix doesn't collide.
     app.include_router(feedback_router.router)
