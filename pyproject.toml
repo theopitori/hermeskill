@@ -1,5 +1,5 @@
 [project]
-name = "stasis-workspace"
+name = "caspase-workspace"
 version = "0.0.0"
 description = "Caspase — agent supervision via the apoptosis protocol"
 requires-python = ">=3.12"
@@ -8,9 +8,9 @@ requires-python = ">=3.12"
 members = ["packages/*"]
 
 [tool.uv.sources]
-stasis-agent = { workspace = true }
-stasis-control-plane = { workspace = true }
-stasis-hermes = { workspace = true }
+caspase = { workspace = true }
+caspase-control-plane = { workspace = true }
+caspase-hermes = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -45,7 +45,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 addopts = "--import-mode=importlib -m 'not legacy'"
-testpaths = ["packages/stasis-sdk/tests", "packages/stasis-control-plane/tests", "packages/stasis-hermes/tests"]
+testpaths = ["packages/caspase-sdk/tests", "packages/caspase-control-plane/tests", "packages/caspase-hermes/tests"]
 markers = [
     "legacy: LangGraph integration tests (paused; run with -m legacy to execute)",
 ]

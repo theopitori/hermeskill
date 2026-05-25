@@ -1,6 +1,6 @@
 """One-shot verification script for M1.1: confirms tables + seed exist.
 
-Run: `uv run python scripts/verify_m1_1.py` with STASIS_DB_URL set.
+Run: `uv run python scripts/verify_m1_1.py` with CASPASE_DB_URL set.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 
 async def main() -> int:
-    url = os.environ["STASIS_DB_URL"]
+    url = os.environ["CASPASE_DB_URL"]
     engine = create_async_engine(url)
     async with engine.connect() as conn:
         # 1. Tables exist

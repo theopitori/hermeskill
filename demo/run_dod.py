@@ -19,15 +19,15 @@ The script is cross-platform (works on Windows + macOS + Linux) — it
 shells out to `uv run` to invoke the demo agent + CLI. Prereqs:
 
     * A `.env` file at the repo root with at minimum:
-        STASIS_API_KEY=sk_dev_developer_local_only_do_not_ship
-        STASIS_BASE_URL=http://localhost:8000
+        CASPASE_API_KEY=sk_dev_developer_local_only_do_not_ship
+        CASPASE_BASE_URL=http://localhost:8000
 
-    * Postgres reachable at `STASIS_DB_URL`, schema upgraded to head:
-        uv run --package stasis-control-plane \\
-            alembic -c packages/stasis-control-plane/alembic.ini upgrade head
+    * Postgres reachable at `CASPASE_DB_URL`, schema upgraded to head:
+        uv run --package caspase-control-plane \\
+            alembic -c packages/caspase-control-plane/alembic.ini upgrade head
 
     * The control plane running locally:
-        uv run --package stasis-control-plane stasis-control-plane
+        uv run --package caspase-control-plane caspase-control-plane
       (or `python -m control_plane.main`)
 
 Usage:
@@ -53,29 +53,29 @@ from pathlib import Path
 
 _OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
 
-# Make stasis_agent + control_plane importable for the API-side queries
+# Make caspase + control_plane importable for the API-side queries
 # we do in step 4 (so we don't have to shell out for everything).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# stasis_agent is available via the venv managed by `uv run`.
-from stasis_agent.client import StasisClient  # noqa: E402
+# caspase is available via the venv managed by `uv run`.
+from caspase.client import CaspaseClient  # noqa: E402
 
 # --- operator helpers ----------------------------------------------------
 
 
 def _op_env() -> dict[str, str]:
     """Env dict for operator CLI calls: injects operator key + UTF-8 stdio."""
-    return {**os.environ, "STASIS_API_KEY": _OPERATOR_KEY, "PYTHONIOENCODING": "utf-8"}
+    return {**os.environ, "CASPASE_API_KEY": _OPERATOR_KEY, "PYTHONIOENCODING": "utf-8"}
 
 
-def _run_stasis_cli(
+def _run_caspase_cli(
     *args: str, timeout: float = 30.0
 ) -> subprocess.CompletedProcess[str]:
-    """Run `uv run stasis <args>` with the operator env and capture output."""
+    """Run `uv run caspase <args>` with the operator env and capture output."""
     return subprocess.run(
-        ["uv", "run", "stasis", *args],
+        ["uv", "run", "caspase", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -114,7 +114,7 @@ def _run(
     """Run a subprocess; fail the demo if returncode doesn't match `expect`.
 
     `expect_returncode=None` accepts any code (useful for `--induce loop`
-    which is supposed to exit 3 on StasisTerminated).
+    which is supposed to exit 3 on CaspaseTerminated).
     """
     print(f"  $ {' '.join(cmd)}")
     proc = subprocess.run(
@@ -143,7 +143,7 @@ def _run(
 
 
 def _load_env() -> None:
-    """Read .env so we can read STASIS_BASE_URL / STASIS_API_KEY here too."""
+    """Read .env so we can read CASPASE_BASE_URL / CASPASE_API_KEY here too."""
     path = Path(".env")
     if not path.exists():
         return
@@ -163,7 +163,7 @@ def step_1_integration() -> str:
         ["uv", "run", "python", "demo/coding_agent/agent.py"],
         timeout=120.0,
     )
-    # Pull the agent_id printed by `tip: uv run stasis logs <id>`.
+    # Pull the agent_id printed by `tip: uv run caspase logs <id>`.
     agent_id = _scrape_agent_id(proc.stdout)
     if not agent_id:
         _fail("could not find agent_id in demo output")
@@ -172,16 +172,16 @@ def step_1_integration() -> str:
 
 
 def step_2_logs(agent_id: str) -> None:
-    """DoD #2: `stasis logs <id>` shows real-time events."""
-    _header(2, "logs — `stasis logs` shows the events")
+    """DoD #2: `caspase logs <id>` shows real-time events."""
+    _header(2, "logs — `caspase logs` shows the events")
     proc = _run(
-        ["uv", "run", "stasis", "logs", agent_id],
+        ["uv", "run", "caspase", "logs", agent_id],
         timeout=30.0,
     )
     # Sanity: the output should include at least one heartbeat or tool_call.
     out = proc.stdout
     if "tool_call" not in out and "heartbeat" not in out and "lifecycle" not in out:
-        _fail("no expected event types found in `stasis logs` output")
+        _fail("no expected event types found in `caspase logs` output")
     _ok("control plane returned events for the agent")
 
 
@@ -190,7 +190,7 @@ def step_3_loop_induction() -> str:
     _header(3, "loop induction — agent self-terminates")
     proc = _run(
         ["uv", "run", "python", "demo/coding_agent/agent.py", "--induce", "loop"],
-        expect_returncode=3,  # demo exits 3 on StasisTerminated
+        expect_returncode=3,  # demo exits 3 on CaspaseTerminated
         timeout=120.0,
     )
     # The agent_id is printed in the death-tip line on stderr.
@@ -208,7 +208,7 @@ def step_4_death_certificate(agent_id: str) -> None:
     # arrives in M6; for now the API is the source of truth).
 
     async def _check() -> None:
-        client = StasisClient.from_config()
+        client = CaspaseClient.from_config()
         try:
             kill_events = await client.list_kill_events(agent_id)
             if not kill_events:
@@ -267,7 +267,7 @@ def _launch_and_find_idle_agent() -> tuple[subprocess.Popen[str], str]:
     )
 
     async def _find() -> str:
-        async with StasisClient.from_config() as client:
+        async with CaspaseClient.from_config() as client:
             for _ in range(60):
                 fleet = await client.list_agents()
                 # Filter by registered_at >= launch_time so a stale row
@@ -297,14 +297,14 @@ def _launch_and_find_idle_agent() -> tuple[subprocess.Popen[str], str]:
 
 
 def step_7_manual_kill() -> None:
-    """DoD #7: operator issues `stasis kill`; the agent dies cooperatively
+    """DoD #7: operator issues `caspase kill`; the agent dies cooperatively
     and the cert records the operator + reason.
 
     Flow:
       1. Launch the idle demo agent via _launch_and_find_idle_agent (which
          filters by registered_at >= launch_time — avoids matching a ghost
          row left by a SIGKILL'd agent from a previous step).
-      2. Run `stasis kill <id> --reason "..."` with the operator key.
+      2. Run `caspase kill <id> --reason "..."` with the operator key.
       3. Wait for the agent process to exit (cooperative — exit code 3).
       4. Read the kill_event and verify trigger_type=manual + operator_reason.
     """
@@ -315,10 +315,10 @@ def step_7_manual_kill() -> None:
     _ok(f"idle agent registered, agent_id={agent_id}")
 
     try:
-        # Issue the kill. _run_stasis_cli injects the operator key and UTF-8
+        # Issue the kill. _run_caspase_cli injects the operator key and UTF-8
         # stdio so Rich glyphs don't crash on Windows cp1252.
-        print("  issuing `stasis kill`…")
-        kill_proc = _run_stasis_cli(
+        print("  issuing `caspase kill`…")
+        kill_proc = _run_caspase_cli(
             "kill", agent_id,
             "--reason", "DoD step 7: manual kill demo",
             "--poll-interval", "0.5",
@@ -327,13 +327,13 @@ def step_7_manual_kill() -> None:
         if kill_proc.returncode != 0:
             print(kill_proc.stdout)
             print(kill_proc.stderr, file=sys.stderr)
-            _fail(f"`stasis kill` exited {kill_proc.returncode}")
+            _fail(f"`caspase kill` exited {kill_proc.returncode}")
         if "confirmed dead" not in kill_proc.stdout:
-            _fail("`stasis kill` did not confirm death")
+            _fail("`caspase kill` did not confirm death")
         _ok("CLI reported confirmed dead")
 
         # The agent process should exit on its own with code 3
-        # once StasisTerminated bubbles up.
+        # once CaspaseTerminated bubbles up.
         try:
             agent_proc.wait(timeout=30.0)
         except subprocess.TimeoutExpired:
@@ -342,13 +342,13 @@ def step_7_manual_kill() -> None:
         if agent_proc.returncode != 3:
             _fail(
                 f"agent exited {agent_proc.returncode}, expected 3 "
-                f"(StasisTerminated)"
+                f"(CaspaseTerminated)"
             )
-        _ok("agent process exited 3 (StasisTerminated)")
+        _ok("agent process exited 3 (CaspaseTerminated)")
 
         # Verify the kill_event carries operator context.
         async def _verify_cert() -> None:
-            async with StasisClient.from_config() as client:
+            async with CaspaseClient.from_config() as client:
                 kills = await client.list_kill_events(agent_id)
                 if not kills:
                     _fail("no kill_events found")
@@ -384,7 +384,7 @@ def step_8_grant() -> None:
     it via the next heartbeat.
 
     What this step demonstrates (operator workflow):
-      1. `stasis grant <id> --symptoms ... --duration ...` exits 0.
+      1. `caspase grant <id> --symptoms ... --duration ...` exits 0.
       2. The grant is active in `/agents/{id}/grants?active_only=true`.
       3. The grant lands in the agent's heartbeat response (this is how
          the SDK actually picks it up — see HeartbeatOut.active_grants).
@@ -400,7 +400,7 @@ def step_8_grant() -> None:
     SIGKILL (not cooperative shutdown), so the agent's DB row is left
     in `running` state — no cert ever posts. Step 9's
     `_launch_and_find_idle_agent` uses a `registered_at` filter to
-    ignore this ghost row, but `stasis fleet` will show it stale until
+    ignore this ghost row, but `caspase fleet` will show it stale until
     something else terminates it.
     """
     _header(8, "grant — operator issues apoptosis-proofing")
@@ -411,8 +411,8 @@ def step_8_grant() -> None:
 
     try:
         # Step 1: issue the grant via the CLI.
-        print("  issuing `stasis grant`…")
-        grant_proc = _run_stasis_cli(
+        print("  issuing `caspase grant`…")
+        grant_proc = _run_caspase_cli(
             "grant", agent_id,
             "--symptoms", "tool_scope_violation",
             "--duration", "1h",
@@ -421,14 +421,14 @@ def step_8_grant() -> None:
         if grant_proc.returncode != 0:
             print(grant_proc.stdout)
             print(grant_proc.stderr, file=sys.stderr)
-            _fail(f"`stasis grant` exited {grant_proc.returncode}")
+            _fail(f"`caspase grant` exited {grant_proc.returncode}")
         if "grant issued" not in grant_proc.stdout:
-            _fail("`stasis grant` did not confirm issuance")
+            _fail("`caspase grant` did not confirm issuance")
         _ok("CLI reported grant issued")
 
         # Step 2: verify the grant is active via the API.
         async def _verify() -> None:
-            async with StasisClient.from_config() as client:
+            async with CaspaseClient.from_config() as client:
                 actives = await client.list_grants(agent_id, active_only=True)
                 if not actives:
                     _fail("no active grants found for agent")
@@ -470,7 +470,7 @@ def step_9_manual_kill_bypasses_grant() -> None:
     Flow:
       1. Launch idle agent.
       2. Issue grant covering `tool_scope_violation`.
-      3. Issue `stasis kill` — the manual-kill path does NOT route
+      3. Issue `caspase kill` — the manual-kill path does NOT route
          through `apply_grants` (it calls `request_termination` directly
          in the SDK poller), so the kill lands.
       4. Verify the agent died with trigger=manual, despite the active
@@ -485,7 +485,7 @@ def step_9_manual_kill_bypasses_grant() -> None:
     try:
         # Step 1: issue the grant.
         print("  issuing grant…")
-        grant_proc = _run_stasis_cli(
+        grant_proc = _run_caspase_cli(
             "grant", agent_id,
             "--symptoms", "tool_scope_violation",
             "--duration", "1h",
@@ -494,12 +494,12 @@ def step_9_manual_kill_bypasses_grant() -> None:
         if grant_proc.returncode != 0:
             print(grant_proc.stdout)
             print(grant_proc.stderr, file=sys.stderr)
-            _fail(f"`stasis grant` exited {grant_proc.returncode}")
+            _fail(f"`caspase grant` exited {grant_proc.returncode}")
         _ok("grant issued")
 
         # Step 2: kill the agent. The grant must not save it.
         print("  issuing manual kill (should bypass the grant)…")
-        kill_proc = _run_stasis_cli(
+        kill_proc = _run_caspase_cli(
             "kill", agent_id,
             "--reason", "DoD step 9: manual override",
             "--poll-interval", "0.5",
@@ -508,9 +508,9 @@ def step_9_manual_kill_bypasses_grant() -> None:
         if kill_proc.returncode != 0:
             print(kill_proc.stdout)
             print(kill_proc.stderr, file=sys.stderr)
-            _fail(f"`stasis kill` exited {kill_proc.returncode}")
+            _fail(f"`caspase kill` exited {kill_proc.returncode}")
         if "confirmed dead" not in kill_proc.stdout:
-            _fail("`stasis kill` did not confirm death")
+            _fail("`caspase kill` did not confirm death")
         _ok("CLI reported confirmed dead despite active grant")
 
         try:
@@ -521,14 +521,14 @@ def step_9_manual_kill_bypasses_grant() -> None:
         if agent_proc.returncode != 3:
             _fail(
                 f"agent exited {agent_proc.returncode}, expected 3 "
-                f"(StasisTerminated)"
+                f"(CaspaseTerminated)"
             )
         _ok("agent process exited 3")
 
         # Step 3: verify the kill_event is manual + the grant is still
         # there (not auto-revoked — grants survive their bypass).
         async def _verify() -> None:
-            async with StasisClient.from_config() as client:
+            async with CaspaseClient.from_config() as client:
                 kills = await client.list_kill_events(agent_id)
                 if not kills:
                     _fail("no kill_events found")
@@ -559,7 +559,7 @@ def step_9_manual_kill_bypasses_grant() -> None:
 
 
 def _scrape_agent_id(text: str) -> str | None:
-    """The demo prints `uv run stasis logs <UUID>` — pull the UUID out."""
+    """The demo prints `uv run caspase logs <UUID>` — pull the UUID out."""
     import re
 
     m = re.search(
@@ -585,7 +585,7 @@ def main() -> None:
     parser.add_argument(
         "--check-control-plane",
         action="store_true",
-        help="ping STASIS_BASE_URL/healthz before starting and fail if unreachable",
+        help="ping CASPASE_BASE_URL/healthz before starting and fail if unreachable",
     )
     args = parser.parse_args()
 
@@ -641,7 +641,7 @@ def _preflight_health_check() -> None:
     import urllib.error
     import urllib.request
 
-    base = os.environ.get("STASIS_BASE_URL", "http://localhost:8000")
+    base = os.environ.get("CASPASE_BASE_URL", "http://localhost:8000")
     url = base.rstrip("/") + "/healthz"
     print(f"  preflight: GET {url}")
     try:
