@@ -1,10 +1,10 @@
 [project]
 name = "stasis-hermes"
 version = "0.1.0a0"
-description = "Stasis apoptosis plugin for Hermes Agent — install once, your agent never runs away again"
+description = "Caspase apoptosis plugin for Hermes Agent — install once, your agent never runs away again"
 readme = "src/stasis_hermes/README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 dependencies = [
     "stasis-agent>=0.1.0a0",
 ]

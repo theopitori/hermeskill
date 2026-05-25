@@ -1,7 +1,7 @@
 [project]
 name = "stasis-workspace"
 version = "0.0.0"
-description = "Stasis MVP — agent supervision via apoptosis protocol"
+description = "Caspase — agent supervision via the apoptosis protocol"
 requires-python = ">=3.12"
 
 [tool.uv.workspace]

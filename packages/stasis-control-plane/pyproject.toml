@@ -1,10 +1,10 @@
 [project]
 name = "stasis-control-plane"
 version = "0.1.0a0"
-description = "Stasis Control Plane — FastAPI backend for agent supervision"
+description = "Caspase Control Plane — FastAPI backend for agent supervision"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

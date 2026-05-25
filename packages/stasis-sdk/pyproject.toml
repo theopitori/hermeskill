@@ -1,10 +1,10 @@
 [project]
 name = "stasis-agent"
 version = "0.1.0a0"
-description = "Stasis SDK — apoptosis protocol core: watcher state, symptom checks, death certificates, and control-plane client"
+description = "Caspase SDK — apoptosis protocol core: watcher state, symptom checks, death certificates, and control-plane client"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 dependencies = [
     "pydantic>=2.8",
     "httpx>=0.27",
