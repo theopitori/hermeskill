@@ -1,0 +1,22 @@
+[Unit]
+Description=Caspase Control Plane (FastAPI)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=caspase
+Group=caspase
+WorkingDirectory=/opt/caspase
+ExecStart=/opt/caspase/.venv/bin/caspase-control-plane
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/caspase
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

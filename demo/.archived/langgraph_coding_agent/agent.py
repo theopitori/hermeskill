@@ -9,16 +9,16 @@ Run against the live control plane:
     uv run python demo/coding_agent/agent.py --induce scope
 
 Requires `.env` at repo root (or env vars) with:
-    STASIS_DB_URL    — only used by the control plane, not this script
-    STASIS_API_KEY   — the dev developer key
+    CASPASE_DB_URL    — only used by the control plane, not this script
+    CASPASE_API_KEY   — the dev developer key
 
 What it does:
     1. Defines a 4-node LangGraph: plan → read_file → write_file → finish
-    2. Each working node calls a LangChain `@tool` so the StasisCallbackHandler
+    2. Each working node calls a LangChain `@tool` so the CaspaseCallbackHandler
        sees `on_tool_start` and queues TOOL_CALL events
     3. Calls `await watch(graph, ...)` — the 5-line integration
     4. Runs `await graph.ainvoke(...)` to completion
-    5. Prints the agent_id so you can verify with `stasis logs <id>` (M1.8)
+    5. Prints the agent_id so you can verify with `caspase logs <id>` (M1.8)
 
 **Induce modes (M2.6)** — deliberately misbehave to demonstrate that the
 supervision catches each of the M2 symptoms. Each mode terminates the
@@ -33,7 +33,7 @@ agent cooperatively and leaves a death certificate on the control plane:
 manual kill. The agent registers and then sleeps in 0.5s ticks, calling
 a tool each tick so the L1 checkpoint fires often. The SDK's kill-pending
 poller picks up an operator-issued `/terminate` within ~3s and the next
-checkpoint raises StasisTerminated.
+checkpoint raises CaspaseTerminated.
 
     --idle               — loop until killed externally (or 120s timeout)
 
@@ -52,14 +52,14 @@ import time
 from pathlib import Path
 from typing import Any, TypedDict
 
+from caspase import CaspaseTerminated, watch
+from caspase.checks import run_all
+from caspase.client import AuthError
+from caspase.langchain import _apply_results
+from caspase.watcher import all_watchers
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
-from stasis_agent import StasisTerminated, watch
-from stasis_agent.checks import run_all
-from stasis_agent.client import AuthError
-from stasis_agent.langchain import _apply_results
-from stasis_agent.watcher import all_watchers
 
 # --- minimal .env loader (no python-dotenv dep needed for the demo) -------
 
@@ -118,7 +118,7 @@ def plan(state: AgentState, config: RunnableConfig) -> AgentState:
 
 def read_step(state: AgentState, config: RunnableConfig) -> AgentState:
     # Tool invocation propagates the LangGraph config (which carries our
-    # Stasis callback handler), so on_tool_start fires.
+    # Caspase callback handler), so on_tool_start fires.
     contents = read_file.invoke({"path": "dummy.py"}, config=config)
     print(f"[read]  got {len(contents)} bytes")
     return {"files_read": [*state.get("files_read", []), "dummy.py"]}
@@ -146,7 +146,7 @@ def _induce_loop_step(state: AgentState, config: RunnableConfig) -> AgentState:
 
     Coding-default sets max_loop_repeats=5. The 5th identical call flips
     the apoptosis flag inside `on_tool_start`'s post-record `run_all`;
-    the 6th call's pre-record `_checkpoint` raises `StasisTerminated`
+    the 6th call's pre-record `_checkpoint` raises `CaspaseTerminated`
     before the tool dispatches.
     """
     print("[induce loop] firing 6 identical read_file calls")
@@ -163,7 +163,7 @@ def _induce_cost_step(state: AgentState, config: RunnableConfig) -> AgentState:
     `WatcherState` and run the checks directly (in a production agent
     LangChain's `on_llm_end` would do both). The cost check returns
     Terminal; `_apply_results` flips the flag; the next chain boundary
-    raises `StasisTerminated`.
+    raises `CaspaseTerminated`.
     """
     print("[induce cost] attributing 15M tokens of fake LLM spend")
     state_obj = all_watchers()[0]
@@ -186,7 +186,7 @@ def _induce_wall_clock_step(state: AgentState, config: RunnableConfig) -> AgentS
 def _induce_scope_step(state: AgentState, config: RunnableConfig) -> AgentState:
     """Trip tool-scope by invoking `delete_everything` (not in allowlist).
 
-    The L3 tool quarantine raises StasisTerminated from inside
+    The L3 tool quarantine raises CaspaseTerminated from inside
     `on_tool_start` — the `delete_everything` body never runs.
     """
     print("[induce scope] invoking delete_everything (not in allowlist)")
@@ -206,7 +206,7 @@ def _idle_step(state: AgentState, config: RunnableConfig) -> AgentState:
     """Long-running, well-behaved loop.
 
     For DoD step 7 (manual kill). Reads a file every 0.5s for up to 120s
-    so an operator has plenty of time to issue `stasis kill`. Each
+    so an operator has plenty of time to issue `caspase kill`. Each
     iteration goes through `read_file.invoke(...)` which fires
     `on_tool_start` → L1 checkpoint, so the kill poller's flag flip is
     observed within roughly one tick.
@@ -288,21 +288,21 @@ async def run(
         print(f"\nauth error: {exc}", file=sys.stderr)
         print(
             "\nCreate a `.env` in the repo root with at least:\n"
-            "  STASIS_API_KEY=sk_dev_developer_local_only_do_not_ship\n"
-            "  STASIS_BASE_URL=http://localhost:8000\n",
+            "  CASPASE_API_KEY=sk_dev_developer_local_only_do_not_ship\n"
+            "  CASPASE_BASE_URL=http://localhost:8000\n",
             file=sys.stderr,
         )
         sys.exit(2)
 
     try:
         result = await watched.ainvoke({"task": task})
-    except StasisTerminated as exc:
+    except CaspaseTerminated as exc:
         # Expected when `--induce` is used. The wrapper has already
         # posted the death certificate before re-raising.
         print(f"\n!! agent terminated: {exc.reason}", file=sys.stderr)
         for w in all_watchers():
             print(
-                f"\ntip: read the death cert:\n  uv run stasis logs {w.agent_id}",
+                f"\ntip: read the death cert:\n  uv run caspase logs {w.agent_id}",
                 file=sys.stderr,
             )
         sys.exit(3)
@@ -313,12 +313,12 @@ async def run(
     print(f"\nfinal state: {result}")
     print("\ntip: see what the control plane saw with:")
     for w in all_watchers():
-        print(f"  uv run stasis logs {w.agent_id}")
+        print(f"  uv run caspase logs {w.agent_id}")
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Stasis demo coding agent. Optionally induce a kill for DoD verification.",
+        description="Caspase demo coding agent. Optionally induce a kill for DoD verification.",
     )
     p.add_argument(
         "--task",

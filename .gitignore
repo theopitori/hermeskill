@@ -15,7 +15,7 @@ htmlcov/
 *.sqlite
 .env
 .env.local
-~/.stasis/
+~/.caspase/
 .idea/
 .vscode/
 *.log
