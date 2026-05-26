@@ -197,10 +197,6 @@ uv run --package caspase-control-plane caspase-control-plane         # serve
 uv run --package caspase-control-plane \
     alembic -c packages/caspase-control-plane/alembic.ini upgrade head   # migrate
 
-# demo (end-to-end DoD walkthrough)
-uv run python demo/run_dod.py
-uv run python demo/run_dod.py --skip-step 2,3
-
 # operator CLI
 caspase agents list
 caspase logs <agent_id>
@@ -240,7 +236,7 @@ Double-check `CASPASE_API_KEY` against the row in `api_keys`. The middleware doe
 The control plane probes the pool with `SELECT 1` on every health check. 503 means the DSN is wrong or Postgres isn't reachable. Check `CASPASE_DB_URL` and the Postgres server.
 
 **Agent doesn't self-terminate after the cooperative-kill flag is set**
-`task.cancel()` only fires at the next `await`. Agents wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) won't notice the flag until they return to the event loop. Mitigation: run the agent in its own subprocess so a parent can `SIGTERM`/`SIGKILL` it on timeout (the demo runner in `demo/run_dod.py` is a worked example).
+`task.cancel()` only fires at the next `await`. Agents wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) won't notice the flag until they return to the event loop. Mitigation: run the agent in its own subprocess so a parent process can `SIGTERM`/`SIGKILL` it on timeout.
 
 **`pytest` fails in `packages/caspase-control-plane/tests/`**
 The control-plane tests connect to a real Postgres via `CASPASE_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/caspase-sdk/tests packages/caspase-hermes/tests`.
@@ -255,8 +251,6 @@ Caspase/
 │   ├── caspase-sdk/                  # SDK: watcher, checks, client, CLI
 │   ├── caspase-control-plane/        # FastAPI service + Alembic migrations
 │   └── caspase-hermes/               # Hermes Agent plugin
-├── demo/
-│   └── run_dod.py                    # end-to-end DoD walkthrough runner
 ├── deploy/
 │   ├── setup.sh                      # Ubuntu VM bootstrap
 │   ├── dev-db-bootstrap.ps1          # Windows Postgres dev setup

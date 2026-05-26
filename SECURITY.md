@@ -60,4 +60,4 @@ The SDK ↔ control-plane channel is authenticated with a per-customer API key b
 - Treat `CASPASE_API_KEY` as a secret. Do not commit it; rotate it on staff churn.
 - Run the control plane behind your own TLS terminator (reverse proxy, load balancer). The service speaks plain HTTP and is designed to live behind one.
 - Restrict network access to the Postgres instance. The control plane is the only intended client.
-- For untrusted or long-running agents, launch them in their own subprocess so a parent can `SIGTERM`/`SIGKILL` on cooperative-kill timeout. The demo runner in `demo/run_dod.py` is a worked example.
+- For untrusted or long-running agents, launch them in their own subprocess so a parent process can `SIGTERM`/`SIGKILL` on cooperative-kill timeout.

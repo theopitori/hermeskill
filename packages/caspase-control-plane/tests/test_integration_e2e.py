@@ -1,7 +1,7 @@
-"""End-to-end M1.9 — the whole SDK→server loop, no mocks.
+"""End-to-end SDK→server loop integration tests.
 
-Runs the actual demo agent against an in-process FastAPI app (via httpx
-ASGITransport) backed by your real Postgres. Verifies the full pipeline:
+Runs the demo agent against an in-process FastAPI app (via httpx
+ASGITransport) backed by Postgres. Verifies the full pipeline:
 
     SDK watch()
         → POST /agents (register)
@@ -10,24 +10,31 @@ ASGITransport) backed by your real Postgres. Verifies the full pipeline:
         → POST /agents/{id}/events
         → GET  /agents/{id}/events  (the SDK reading back)
 
-If this test passes, M1 is done.
-
-NOTE: no `from __future__ import annotations` — see test_smoke.py for why.
+These tests are currently SKIPPED — they depend on `demo.coding_agent`,
+which was removed during the M6-H Hermes pivot. Test bodies are preserved
+as the executable spec for the eventual rebuild. Unskip once the new
+coding-agent demo lands.
 """
 
-from typing import Any
-
-import httpx
 import pytest
-from caspase import watch
-from caspase.client import CaspaseClient
-from caspase.types import EventType
-from caspase.watcher import (
+
+pytestmark = pytest.mark.skip(
+    reason="demo.coding_agent was removed during the M6-H Hermes pivot; "
+    "re-enable when the rebuilt coding-agent demo lands"
+)
+
+from typing import Any  # noqa: E402
+
+import httpx  # noqa: E402
+from caspase import watch  # noqa: E402
+from caspase.client import CaspaseClient  # noqa: E402
+from caspase.types import EventType  # noqa: E402
+from caspase.watcher import (  # noqa: E402
     BackgroundWorker,
     _reset_registry_for_tests,
 )
-from control_plane.main import app
-from sqlalchemy import text
+from control_plane.main import app  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
 

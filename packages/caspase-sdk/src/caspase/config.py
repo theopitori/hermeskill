@@ -26,7 +26,6 @@ def _load_dotenv_into_environ(path: Path = Path(".env")) -> None:
     """Best-effort .env loader. Only sets keys that aren't already in the env.
 
     Tiny on purpose — we don't want a python-dotenv dependency just for this.
-    Mirrors the same loader the demo agent uses (demo/coding_agent/agent.py).
     """
     if not path.exists():
         return
