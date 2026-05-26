@@ -42,7 +42,7 @@ Or add the same keys to `~/.hermes/.env`.
 hermes
 ```
 
-Caspase activates automatically. Every session appears in the dashboard.
+Caspase activates automatically. Every session is queryable via the operator CLI (`caspase agents list`).
 
 ## What it does
 
@@ -64,8 +64,9 @@ Shipped defaults:
 
 | Policy | Loop cap | Cost cap | Wall-clock cap |
 |--------|----------|----------|----------------|
-| `coding-default` | 5 repeats / 20 actions | $2.00 | 30 min |
-| `coding-permissive` | 8 repeats / 40 actions | $10.00 | 2 h |
+| `strict` | 3 repeats / 15 actions | $2.00 | 5 min |
+| `coding-default` | 5 repeats / 20 actions | $25.00 | 30 min |
+| `permissive` | 10 repeats / 40 actions | $100.00 | 2 h |
 
 ## Operator CLI
 

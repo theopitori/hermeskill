@@ -197,6 +197,10 @@ class CaspasePlugin:
         """
         if tool_name in self._registered_overrides:
             return
+        # _arm_kill_override is only reachable after setup() has populated
+        # _state; the type-narrowing assert makes that contract explicit
+        # for mypy and surfaces a useful error if the invariant ever breaks.
+        assert self._state is not None, "_arm_kill_override called before setup()"
         reason = self._state.terminate_reason or "caspase termination"
         stub = _KillStub(tool_name, reason)
         try:

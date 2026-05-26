@@ -37,8 +37,6 @@ from caspase.apoptosis import Watchdog, build_kill_event_payload
 from caspase.client import CaspaseClient
 from caspase.config import SDKConfig
 from caspase.exceptions import CaspaseTerminated
-from caspase.langchain import CaspaseCallbackHandler
-from caspase.langgraph import with_caspase
 from caspase.policies import resolve_policy
 from caspase.watcher import (
     WatcherState,
@@ -48,6 +46,28 @@ from caspase.watcher import (
 
 if TYPE_CHECKING:
     from langchain_core.runnables import Runnable
+
+
+def _require_langgraph_adapter() -> tuple[Any, Any]:
+    """Import the legacy LangGraph adapter lazily.
+
+    The supported runtime today is Hermes Agent. The LangGraph callback
+    handler and `with_caspase` Runnable wrapper still ship for legacy
+    callers but live behind the `[langgraph]` extra; the rest of the SDK
+    must remain importable without `langchain_core` / `langgraph`
+    installed.
+    """
+    try:
+        from caspase.langchain import CaspaseCallbackHandler
+        from caspase.langgraph import with_caspase
+    except ImportError as exc:  # pragma: no cover - exercised in CI without extra
+        raise ImportError(
+            "caspase.watch() with a LangGraph/LangChain runnable requires "
+            "the optional `[langgraph]` extra. Install with "
+            "`pip install caspase[langgraph]` or use the Hermes adapter "
+            "(`pip install caspase-hermes`)."
+        ) from exc
+    return CaspaseCallbackHandler, with_caspase
 
 logger = logging.getLogger("caspase.watch")
 
@@ -72,6 +92,11 @@ async def watch(
     # UnknownPolicyError at the watch() call site rather than a 4xx from
     # the server (which currently accepts any name; M5 tightens that up).
     resolved_policy = resolve_policy(policy)
+
+    # Lazy-import the LangGraph adapter so a bare `import caspase` works
+    # without `langchain_core` / `langgraph` installed. Hermes users never
+    # hit this path.
+    CaspaseCallbackHandler, with_caspase = _require_langgraph_adapter()
 
     owns_client = client is None
     if client is None:

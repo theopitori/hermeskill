@@ -117,7 +117,7 @@ def test_arm_kill_override_logs_on_ctx_failure(ctx: MagicMock, caplog: pytest.Lo
 
 
 def test_session_end_no_kill_does_not_post_cert(ctx: MagicMock) -> None:
-    plugin, state = _make_plugin(ctx)
+    plugin, _state = _make_plugin(ctx)
     # No kill — session_end should not try to post
     with patch.object(plugin, "_post_death_cert_best_effort", new_callable=AsyncMock) as mock_post:
         plugin.session_end()

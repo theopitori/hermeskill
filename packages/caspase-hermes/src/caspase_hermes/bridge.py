@@ -65,7 +65,7 @@ def on_pre_tool_call(
     # doesn't pollute the loop ring buffer with tools we shouldn't be
     # tracking. Mirrors langchain.py's on_tool_start ordering.
     scope = check_tool_scope(tool_name, state.policy)
-    if not isinstance(scope, type(None)) and not _is_healthy(scope):
+    if isinstance(scope, (Terminal, Warning)):
         verdicts.append(scope)
 
     try:

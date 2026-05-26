@@ -6,7 +6,7 @@ Drop one plugin into your agent runtime and Caspase watches every tool call and 
 pip install caspase-hermes
 ```
 
-That's it. Start your Hermes Agent session and Caspase activates automatically. Every session shows up in the dashboard; every kill is explainable.
+That's it. Start your Hermes Agent session and Caspase activates automatically. Every session is queryable via the operator CLI (`caspase agents list`, `caspase logs <id>`) and the control-plane HTTP API; every kill is explainable.
 
 ---
 
@@ -32,7 +32,7 @@ For each watched agent you get:
 
 | Requirement | Minimum | Check | Install |
 |---|---|---|---|
-| Python | 3.12+ | `python --version` | [python.org](https://www.python.org/downloads/) |
+| Python | 3.14+ | `python --version` | [python.org](https://www.python.org/downloads/) |
 | uv *(recommended)* | any | `uv --version` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Postgres *(control plane only)* | 14+ | `psql --version` | [postgresql.org](https://www.postgresql.org/download/) |
 
@@ -43,12 +43,12 @@ winget install astral-sh.uv
 
 **macOS quick install:**
 ```bash
-brew install python@3.12 uv
+brew install python@3.14 uv
 ```
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt install python3.12 python3-pip
+sudo apt install python3.14 python3-pip
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -106,11 +106,11 @@ The service listens on `http://localhost:8000`. `/healthz` returns 200 with a `d
 
 | Symptom | What triggers it |
 |---|---|
-| `loop` | Same tool called 5× in a row with identical inputs (per policy) |
+| `loop` | Same tool called N× in a row with identical inputs (threshold per policy) |
 | `token_runaway` | Cumulative LLM cost exceeds the policy cost cap |
 | `wall_clock` | Session runs longer than the policy wall-clock cap |
 | `tool_scope_violation` | Agent calls a tool not in the policy allowlist |
-| `heartbeat_loss` | SDK stops posting heartbeats — operator can confirm via the dashboard |
+| `heartbeat_loss` | SDK stops posting heartbeats — operator can confirm via `caspase agents list` |
 | `manual_kill` | Operator issues `caspase kill <agent_id>` (bypasses grants) |
 
 On any terminal symptom Caspase requests a cooperative shutdown via the framework adapter; the SDK posts a death certificate with the full symptom log and a feedback URL.
@@ -121,12 +121,15 @@ On any terminal symptom Caspase requests a cooperative shutdown via the framewor
 
 Shipped defaults live in the SDK:
 
-| Policy | Loop cap | Cost cap | Wall-clock cap |
-|---|---|---|---|
-| `coding-default` | 5 repeats / 20 actions | $2.00 | 30 min |
-| `coding-permissive` | 8 repeats / 40 actions | $10.00 | 2 h |
+| Policy | Loop cap | Cost cap | Wall-clock cap | Grantable symptoms |
+|---|---|---|---|---|
+| `strict` | 3 repeats / 15 actions | $2.00 | 5 min | none |
+| `coding-default` | 5 repeats / 20 actions | $25.00 | 30 min | `tool_scope_violation` |
+| `permissive` | 10 repeats / 40 actions | $100.00 | 2 h | `tool_scope_violation`, `loop` |
 
-Customers can pass a custom policy via `policy=...` on the watch call, or — for fleet-wide overrides — define one in the control plane and reference it by name. Policy resolution happens server-side at agent registration.
+`strict` ships a tight tool allowlist (`read_file`, `search`) for untrusted code paths. `coding-default` is what the demo runs. `permissive` opens the tool surface entirely (`tool_allowlist=[]` is treated as "any tool") and is meant for trusted internal agents under active operator supervision.
+
+Customers can also pass a custom `Policy` object via `policy=...` on the watch call. Server-side custom policies (load-from-YAML + CRUD on the control plane) are on the roadmap.
 
 ---
 
@@ -149,7 +152,7 @@ caspase grants revoke <grant_id>             # idempotent revoke
 ## What's in a death certificate
 
 - **Symptom log** — every check that fired, with detail payloads.
-- **Shutdown sequence** — L1 cooperative request → L2 framework adapter → L2.5 subprocess kill escalation (when configured) → L3 hard exit.
+- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter (raises `CaspaseTerminated` at the next tool boundary or arms a `tool_override` kill stub on Hermes).
 - **Cost summary** — input/output tokens per model, USD.
 - **Tool signature window** — the last 20 tool calls with their argument hashes (this is what the loop check reads).
 - **Feedback URL** — one-click "this kill was right / wrong" so verdicts compound over time. Token is single-use, expires, and the hash is symmetric on both ends.
@@ -177,10 +180,10 @@ caspase grants create <agent_id> \
 |---|---|---|
 | `CASPASE_API_KEY` | Agent → control plane authentication | Always |
 | `CASPASE_BASE_URL` | Control plane URL | If not `http://localhost:8000` |
-| `CASPASE_AGENT_NAME` | Display name in the dashboard | Optional |
+| `CASPASE_AGENT_NAME` | Display name for the registered agent | Optional |
 | `CASPASE_POLICY` | Named policy override | Optional |
 | `CASPASE_DB_URL` | Control-plane Postgres DSN | Control plane only |
-| `CASPASE_DEV_KEY` | Disabled — auth uses the real `api_keys` table from M1 onward | Never |
+| `CASPASE_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
 
 `.env` at the repo root is read automatically by the demo and CLI entry points (`.env.example` documents the keys; `.env` is git-ignored).
 
@@ -228,38 +231,43 @@ uv run ruff check .
 The CLI ships in the `caspase` distribution (a transitive dep). Install via `uv tool install caspase` or `pipx install caspase` to get the CLI on your PATH, then keep the Hermes plugin install as documented above.
 
 **Control plane returns 401 on every request**
-Double-check `CASPASE_API_KEY` against the row in `api_keys`. The middleware does a real hashed-key lookup from M1 onward — there is no stub key path.
+Double-check `CASPASE_API_KEY` against the row in `api_keys`. The middleware does a real hashed-key lookup — there is no stub key path.
 
 **`caspase kill` exits 6**
-"Kill issued but unconfirmed within Xs" — the directive was accepted but no death certificate arrived inside the CLI timeout. The kill-event id is printed; reconcile via `caspase logs <agent_id>` or the dashboard.
-
-
+"Kill issued but unconfirmed within Xs" — the directive was accepted but no death certificate arrived inside the CLI timeout. The kill-event id is printed; reconcile via `caspase logs <agent_id>` or by querying the control-plane API directly.
 
 **`/healthz` returns 503 with `db_error`**
 The control plane probes the pool with `SELECT 1` on every health check. 503 means the DSN is wrong or Postgres isn't reachable. Check `CASPASE_DB_URL` and the Postgres server.
 
-**Demo agent doesn't self-terminate after `--induce loop`**
-The cooperative-kill path is best-effort if the agent is wedged in synchronous code. Run the demo agent in its own subprocess (as `demo/run_dod.py` does) so the L2.5 subprocess kill escalation can fire.
+**Agent doesn't self-terminate after the cooperative-kill flag is set**
+`task.cancel()` only fires at the next `await`. Agents wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) won't notice the flag until they return to the event loop. Mitigation: run the agent in its own subprocess so a parent can `SIGTERM`/`SIGKILL` it on timeout (the demo runner in `demo/run_dod.py` is a worked example).
+
+**`pytest` fails in `packages/caspase-control-plane/tests/`**
+The control-plane tests connect to a real Postgres via `CASPASE_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/caspase-sdk/tests packages/caspase-hermes/tests`.
 
 ---
 
 ## Repo layout
 
 ```
-Caspase/                                          # repo root (folder name still pre-rename)
+Caspase/
 ├── packages/
-│   ├── caspase-sdk/                              # SDK: watcher, checks, client, CLI
-│   ├── caspase-control-plane/                    # FastAPI service + Alembic migrations
-│   └── caspase-hermes/                           # Hermes Agent plugin
+│   ├── caspase-sdk/                  # SDK: watcher, checks, client, CLI
+│   ├── caspase-control-plane/        # FastAPI service + Alembic migrations
+│   └── caspase-hermes/               # Hermes Agent plugin
 ├── demo/
-│   └── run_dod.py                               # 9-step end-to-end DoD walkthrough
+│   └── run_dod.py                    # end-to-end DoD walkthrough runner
 ├── deploy/
-│   ├── setup.sh                                 # Ubuntu VM bootstrap
-│   ├── dev-db-bootstrap.ps1                     # Windows Postgres dev setup
-│   └── caspase-control-plane.service             # systemd unit
-├── scripts/                                     # one-off verification scripts
-├── pyproject.toml                               # uv workspace root
-└── LICENSE                                      # MIT
+│   ├── setup.sh                      # Ubuntu VM bootstrap
+│   ├── dev-db-bootstrap.ps1          # Windows Postgres dev setup
+│   └── caspase-control-plane.service # systemd unit
+├── scripts/                          # one-off verification scripts
+├── .github/workflows/                # CI (ruff + mypy + pytest)
+├── pyproject.toml                    # uv workspace root
+├── .python-version                   # Python 3.14
+├── README.md
+├── SECURITY.md
+└── LICENSE                           # MIT
 ```
 
 ---

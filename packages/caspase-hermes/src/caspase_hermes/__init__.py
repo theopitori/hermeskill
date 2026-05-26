@@ -61,23 +61,19 @@ def register(ctx: Any) -> None:
     name = os.environ.get("CASPASE_AGENT_NAME", "hermes")
     policy = os.environ.get("CASPASE_POLICY", "coding-default")
 
-    config = SDKConfig.from_env()
+    config = SDKConfig.load()
     client = CaspaseClient.from_config(config)
 
     plugin = CaspasePlugin(ctx, name=name, policy=policy, client=client)
 
     # Run async setup synchronously — Hermes calls register() outside of an
-    # async context. If an event loop is already running (e.g. in tests), use
-    # asyncio.ensure_future and wait; otherwise use asyncio.run.
+    # async context. If an event loop is already running (e.g. in tests),
+    # surface a RuntimeError pointing the caller at `async_register()`.
+    # Practical note: Hermes typically calls register() synchronously before
+    # entering its async turn loop, so the no-running-loop branch is the
+    # normal path.
     try:
-        loop = asyncio.get_running_loop()
-        # Inside a running loop — schedule and wait using run_until_complete
-        # on a *new* thread-loop pairing is not possible; instead we create
-        # a task and let the caller's loop drive it.
-        # Practical note: Hermes typically calls register() synchronously
-        # before entering its async turn loop, so there should be no running
-        # loop here. If this ever fires in an async context, the user will
-        # see a RuntimeError with a clear message.
+        asyncio.get_running_loop()
         raise RuntimeError(
             "caspase_hermes.register() was called from inside a running event loop. "
             "If you are initialising Caspase from an async context, call "
@@ -108,7 +104,7 @@ async def async_register(ctx: Any) -> None:
     name = os.environ.get("CASPASE_AGENT_NAME", "hermes")
     policy = os.environ.get("CASPASE_POLICY", "coding-default")
 
-    config = SDKConfig.from_env()
+    config = SDKConfig.load()
     client = CaspaseClient.from_config(config)
 
     plugin = CaspasePlugin(ctx, name=name, policy=policy, client=client)

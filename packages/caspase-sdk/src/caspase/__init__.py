@@ -3,8 +3,13 @@
 Framework-agnostic core: WatcherState, symptom checks, death certificates,
 kill-event client, operator CLI. Install a framework adapter on top:
 
-    pip install caspase-hermes         # Hermes Agent plugin
-    # caspase[langgraph]         # LangGraph adapter (coming soon)
+    pip install caspase-hermes         # Hermes Agent plugin (recommended)
+    pip install caspase[langgraph]     # legacy LangGraph adapter
+
+The bare `caspase` package imports with no third-party agent-framework
+dependencies; framework-specific code (LangGraph callback handler,
+LangChain runnable wrapping) is lazy-loaded only when `watch()` is called
+on a LangGraph object.
 
 Public exceptions:
 
