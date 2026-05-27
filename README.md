@@ -32,7 +32,7 @@ For each watched agent you get:
 
 | Requirement | Minimum | Check | Install |
 |---|---|---|---|
-| Python | 3.14+ | `python --version` | [python.org](https://www.python.org/downloads/) |
+| Python | 3.11+ | `python --version` | [python.org](https://www.python.org/downloads/) |
 | uv *(recommended)* | any | `uv --version` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Postgres *(control plane only)* | 14+ | `psql --version` | [postgresql.org](https://www.postgresql.org/download/) |
 
@@ -43,12 +43,12 @@ winget install astral-sh.uv
 
 **macOS quick install:**
 ```bash
-brew install python@3.14 uv
+brew install python@3.11 uv
 ```
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt install python3.14 python3-pip
+sudo apt install python3.11 python3-pip
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -64,8 +64,6 @@ git clone https://github.com/seijeupessoal-ui/Caspase.git
 cd Caspase && uv sync
 uv run python demo/coding_agent/agent.py --induce loop
 ```
-
-![Caspase killing a looping agent](docs/demo.gif)
 
 Try the other failure modes: `--induce cost`, `--induce wall-clock`, `--induce scope`.  
 Run without `--induce` for the happy path (exits 0).
@@ -276,7 +274,7 @@ Caspase/
 ├── scripts/                          # one-off verification scripts
 ├── .github/workflows/                # CI (ruff + mypy + pytest)
 ├── pyproject.toml                    # uv workspace root
-├── .python-version                   # Python 3.14
+├── .python-version                   # Python interpreter pin for `uv`
 ├── README.md
 ├── SECURITY.md
 └── LICENSE                           # MIT

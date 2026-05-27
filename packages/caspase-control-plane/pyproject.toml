@@ -3,7 +3,7 @@ name = "caspase-control-plane"
 version = "0.1.0a0"
 description = "Caspase Control Plane — FastAPI backend for agent supervision"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     "fastapi>=0.115",

@@ -36,5 +36,19 @@ __all__ = [
 
 
 def checkpoint() -> None:
-    """Cooperative termination point for non-LangGraph custom loops. Implemented in M2."""
-    raise NotImplementedError("checkpoint() lands in M2")
+    """Cooperative termination point for non-LangGraph custom loops.
+
+    Call inside long-running synchronous work to give Caspase a chance to
+    terminate the agent. Raises CaspaseTerminated if any registered watcher
+    has its apoptosis flag set; no-op otherwise. Safe to call from code with
+    no registered watcher (returns immediately).
+    """
+    from caspase.exceptions import CaspaseTerminated
+    from caspase.watcher import all_watchers
+
+    for state in all_watchers():
+        if state.terminate_requested:
+            raise CaspaseTerminated(
+                state.terminate_reason or "terminated",
+                kill_event_id=state.terminate_kill_event_id,
+            )
