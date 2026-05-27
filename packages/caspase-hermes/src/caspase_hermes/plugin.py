@@ -175,13 +175,15 @@ class CaspasePlugin:
             return
         bridge_on_session_end(self._state)
         # Best-effort: flush death cert if apoptosis fired this session.
+        # Use asyncio.run() — safe here because session_end() is a sync Hermes
+        # hook called outside of any running event loop. On Python 3.12+,
+        # get_event_loop() without a running loop is deprecated; asyncio.run()
+        # always creates and tears down its own loop cleanly.
         if self._state.terminate_requested:
-            asyncio.get_event_loop().run_until_complete(
-                self._post_death_cert_best_effort()
-            )
+            asyncio.run(self._post_death_cert_best_effort())
         if self._state.agent_id:
             unregister_watcher(self._state.agent_id)
-        asyncio.get_event_loop().run_until_complete(BackgroundWorker.stop())
+        asyncio.run(BackgroundWorker.stop())
 
     # --- kill-override wiring ------------------------------------------------
 

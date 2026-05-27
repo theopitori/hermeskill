@@ -49,9 +49,8 @@ def on_pre_tool_call(
 ) -> list[Terminal | Warning]:
     """Pre-tool boundary checkpoint.
 
-    1. Tool-scope check — fires BEFORE the tool runs (same semantics as the
-       LangChain on_tool_start handler; scope violation is recorded and the
-       Terminal is returned for the caller to act on).
+    1. Tool-scope check — fires BEFORE the tool runs (scope violation is
+       recorded and the Terminal is returned for the caller to act on).
     2. Record the call (loop ring buffer + event queue).
     3. Run state checks (loop, cost, wall-clock).
 
@@ -63,7 +62,7 @@ def on_pre_tool_call(
 
     # Scope check runs first — before recording, so a scope violation
     # doesn't pollute the loop ring buffer with tools we shouldn't be
-    # tracking. Mirrors langchain.py's on_tool_start ordering.
+    # tracking. Must run before record_tool_call for this ordering to hold.
     scope = check_tool_scope(tool_name, state.policy)
     if isinstance(scope, (Terminal, Warning)):
         verdicts.append(scope)

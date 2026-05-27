@@ -26,8 +26,8 @@ Critical contracts:
 5. **Clean teardown** — `stop()` joins the thread within timeout; the
    thread exits when stopped before any kill signal is received.
 
-6. **End-to-end via `watch()`** — an agent registered through `watch()`
-   gets a watchdog automatically, armed on the first chain_start.
+6. **BackgroundWorker.stop() joins watchdog threads** — cleanly shuts
+   down every armed watchdog on worker teardown.
 """
 
 from __future__ import annotations
@@ -334,68 +334,7 @@ async def test_watchdog_detects_direct_flag_write_via_polling() -> None:
     wd.stop()
 
 
-# --- 8. end-to-end via watch() ------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_watch_creates_watchdog_with_policy_grace() -> None:
-    """`watch()` should attach a Watchdog using the policy's
-    cooperative_grace_seconds. Verify the wiring without a live server."""
-    import json as _json
-    from datetime import UTC, datetime
-
-    import httpx
-    from caspase import watch
-    from caspase.client import CaspaseClient
-    from caspase.watcher import all_watchers
-
-    agent_id = str(uuid4())
-    now = datetime.now(UTC).isoformat()
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        body = _json.loads(req.content) if req.content else {}
-        if req.method == "POST" and req.url.path == "/agents":
-            return httpx.Response(
-                201,
-                json={"agent_id": agent_id, "policy_name": body["policy_name"], "registered_at": now},
-            )
-        if req.url.path.endswith("/heartbeat"):
-            return httpx.Response(200, json={"received_at": now, "active_grants": []})
-        if req.url.path.endswith("/events"):
-            return httpx.Response(202, json={"accepted": len(body.get("events", []))})
-        return httpx.Response(404, json={"detail": "unmatched"})
-
-    client = CaspaseClient(
-        base_url="http://test",
-        api_key="sk_test",
-        transport=httpx.MockTransport(handler),
-    )
-
-    # Minimal compiled graph.
-    from typing import TypedDict
-
-    from langgraph.graph import END, START, StateGraph
-
-    class S(TypedDict, total=False):
-        x: int
-
-    g = StateGraph(S)
-    g.add_node("noop", lambda s: {"x": 1})
-    g.add_edge(START, "noop")
-    g.add_edge("noop", END)
-    graph = g.compile()
-
-    try:
-        await watch(graph, name="bot", policy="coding-default", client=client)
-        state = all_watchers()[0]
-        assert state.watchdog is not None
-        # coding-default: cooperative_grace_seconds = 10
-        assert state.watchdog.grace_seconds == 10
-        # Thread is NOT started until first arm() (lazy).
-        assert state.watchdog._thread is None
-    finally:
-        await BackgroundWorker.stop()
-        await client.aclose()
+# --- 8. BackgroundWorker.stop() joins watchdog threads -------------------
 
 
 @pytest.mark.asyncio

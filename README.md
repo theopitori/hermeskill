@@ -152,7 +152,7 @@ caspase grants revoke <grant_id>             # idempotent revoke
 ## What's in a death certificate
 
 - **Symptom log** — every check that fired, with detail payloads.
-- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter (raises `CaspaseTerminated` at the next tool boundary or arms a `tool_override` kill stub on Hermes).
+- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter (arms a `tool_override` kill stub at the next tool boundary, triggering controlled shutdown via the Hermes runtime).
 - **Cost summary** — input/output tokens per model, USD.
 - **Tool signature window** — the last 20 tool calls with their argument hashes (this is what the loop check reads).
 - **Feedback URL** — one-click "this kill was right / wrong" so verdicts compound over time. Token is single-use, expires, and the hash is symmetric on both ends.

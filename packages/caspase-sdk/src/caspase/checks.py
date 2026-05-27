@@ -14,7 +14,7 @@ The orchestrator `run_all(state, policy)` runs the state-only checks and
 returns every non-Healthy verdict. The first `Terminal` is what M2.3's
 apoptosis wiring acts on; warnings are logged. **`check_tool_scope` is
 parameterized by the inbound tool name** so it doesn't fit `run_all`; the
-LangChain handler calls it directly from `on_tool_start` (M2.3).
+framework adapter calls it directly at each tool boundary (M2.3).
 
 The five MVP symptoms from the plan:
 
@@ -214,7 +214,7 @@ def run_all(state: WatcherState, policy: Policy) -> list[Terminal | Warning]:
     """Run every state-only check; return all non-Healthy verdicts.
 
     `check_tool_scope` is excluded — it needs the inbound tool name, which
-    only the LangChain handler has at `on_tool_start`. The handler calls
+    only the framework adapter has at the tool boundary. The adapter calls
     `check_tool_scope` directly and then calls `run_all` for everything else.
 
     The caller (M2.3 apoptosis wiring) treats the first `Terminal` in the

@@ -21,10 +21,10 @@ arms a `tool_override` kill stub that fires at the next tool boundary.
 
 Configuration (env vars or .env file):
 
-    CASPASE_API_KEY          — your operator API key
-    CASPASE_CONTROL_PLANE_URL — defaults to http://localhost:8000
-    CASPASE_AGENT_NAME       — display name for this session (default: "hermes")
-    CASPASE_POLICY           — policy name (default: "coding-default")
+    CASPASE_API_KEY      — your operator API key
+    CASPASE_BASE_URL     — control plane URL (default: http://localhost:8000)
+    CASPASE_AGENT_NAME   — display name for this session (default: "hermes")
+    CASPASE_POLICY       — policy name (default: "coding-default")
 
 Public surface:
     register(ctx)  — Hermes plugin entry point (called by the runtime)

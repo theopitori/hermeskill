@@ -37,15 +37,12 @@ strict = true
 exclude = ["migrations/"]
 
 [[tool.mypy.overrides]]
-module = ["langchain_core.*", "langgraph.*", "hermes_agent.*"]
+module = ["hermes_agent.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-addopts = "--import-mode=importlib -m 'not legacy'"
+addopts = "--import-mode=importlib"
 testpaths = ["packages/caspase-sdk/tests", "packages/caspase-control-plane/tests", "packages/caspase-hermes/tests"]
-markers = [
-    "legacy: LangGraph integration tests (paused; run with -m legacy to execute)",
-]

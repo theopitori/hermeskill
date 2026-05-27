@@ -8,8 +8,8 @@ This module owns three coupled concerns:
    cleanup-hook list (executed by M2's L1 cooperative termination).
 
 2. **Process-level registry** (`_REGISTRY`) — a dict of `agent_id → WatcherState`.
-   Bridges the gap between LangChain callbacks (which only know about the
-   handler instance) and the background worker (which needs to enumerate all
+   Bridges the gap between framework adapters (which only know about their
+   hook instances) and the background worker (which needs to enumerate all
    live agents). `register_watcher()` / `unregister_watcher()` are the only
    write paths.
 
@@ -23,8 +23,8 @@ Lifecycle: `watch()` calls `ensure_worker_started(client)` which is idempotent
 worker stops when the process exits or `BackgroundWorker.stop()` is called
 explicitly.
 
-Apoptosis (M2) flips `state.terminate_requested = True`; the checkpoint
-mechanism in `langgraph.py` / `checkpoint.py` is what actually raises
+Apoptosis (M2) flips `state.terminate_requested = True`; framework adapters
+(e.g. the Hermes plugin) and `caspase.checkpoint()` are what actually raise
 `CaspaseTerminated`. This module never raises; it only records.
 """
 
@@ -77,8 +77,8 @@ class WatcherState:
     started_monotonic: float = field(default_factory=time.monotonic)
 
     # Apoptosis flag — set by M2 symptom checks or by manual kill (M4).
-    # The actual `CaspaseTerminated` raise happens at checkpoint sites
-    # (langgraph gate nodes, `caspase.checkpoint()`), not here.
+    # The actual `CaspaseTerminated` raise happens in framework adapters
+    # and at `caspase.checkpoint()` sites, not here.
     terminate_requested: bool = False
     terminate_reason: str | None = None
     terminate_kill_event_id: str | None = None
@@ -127,7 +127,7 @@ class WatcherState:
     # to a placeholder here so the dataclass machinery is happy.
     loop_signatures: deque[str] = field(default_factory=deque)
 
-    # Token/cost runaway counters — updated by the LangChain handler on llm_end.
+    # Token/cost runaway counters — updated by the framework adapter on each LLM response.
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0
@@ -136,7 +136,7 @@ class WatcherState:
     grants: list[dict[str, Any]] = field(default_factory=list)
 
     # Pending events queue — appended by callbacks, drained by the worker.
-    # Lock protects against concurrent appends from sync LangChain callbacks
+    # Lock protects against concurrent appends from framework adapter callbacks
     # and the async worker.
     _pending_events: list[EventIn] = field(default_factory=list)
     _events_lock: threading.Lock = field(default_factory=threading.Lock)

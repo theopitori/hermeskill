@@ -1,8 +1,8 @@
 """Unit tests for caspase_hermes.bridge.
 
-Each test asserts that a Hermes hook event produces the same WatcherState
-mutation that the equivalent LangChain callback would have produced. The
-bridge has no I/O and no Hermes dependency — everything is pure WatcherState.
+Each test asserts that a Hermes hook event produces the correct WatcherState
+mutation. The bridge has no I/O and no Hermes dependency — everything is
+pure WatcherState.
 
 Coverage:
 - on_pre_tool_call: records tool call + loop ring buffer

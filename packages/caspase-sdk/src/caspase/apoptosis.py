@@ -1,10 +1,11 @@
 """L2 forced-termination watchdog.
 
-L1 (cooperative termination) lives in `langchain.py` — the `_checkpoint`
-raise at chain/tool boundaries. It works as long as the agent's event
-loop is alive and reaching await points. When it isn't — agent is wedged
-inside a sync tool, or just stubbornly ignoring `CaspaseTerminated` — we
-need an out-of-band path that can cancel from outside the loop.
+L1 (cooperative termination) is handled by the framework adapter — the
+kill stub or checkpoint raise at tool/chain boundaries. It works as long
+as the agent's event loop is alive and reaching await points. When it
+isn't — agent is wedged inside a sync tool, or stubbornly ignoring the
+cooperative signal — we need an out-of-band path that can cancel from
+outside the loop.
 
 That's L2: **one daemon `threading.Thread` per watched agent**, holding a
 reference to the agent's asyncio loop and main `Task`. The thread sleeps

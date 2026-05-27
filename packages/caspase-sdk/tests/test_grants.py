@@ -15,10 +15,24 @@ from uuid import uuid4
 
 from caspase.apoptosis import build_death_certificate
 from caspase.checks import Terminal, Warning, apply_grants
-from caspase.langchain import _apply_results
 from caspase.policies import resolve_policy
 from caspase.types import SymptomType, TriggerType
 from caspase.watcher import WatcherState
+
+
+def _apply_results(state: WatcherState, verdicts: list[Terminal | Warning]) -> None:
+    """Test helper: apply grants, record symptoms, flip apoptosis flag on Terminal.
+
+    Replicates the grant-application + state-mutation logic that lives in each
+    framework adapter's hook bridge (e.g. caspase_hermes.bridge.on_pre_tool_call).
+    Lives here rather than in caspase.checks to keep the SDK framework-agnostic.
+    """
+    applied = apply_grants(verdicts, state.grants)
+    for v in applied:
+        severity = "terminal" if isinstance(v, Terminal) else "warning"
+        state.record_symptom(symptom=v.symptom, severity=severity, reason=v.reason, detail=v.detail)
+        if isinstance(v, Terminal) and not state.terminate_requested:
+            state.request_termination(v.reason)
 
 
 def _state() -> WatcherState:
