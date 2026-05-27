@@ -54,22 +54,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Try it
-
-Clone the repo and run one command — Caspase spins up a local control plane
-and demonstrates killing a runaway agent in under 10 seconds:
-
-```bash
-git clone https://github.com/seijeupessoal-ui/Caspase.git
-cd Caspase && uv sync
-uv run python demo/coding_agent/agent.py --induce loop
-```
-
-Try the other failure modes: `--induce cost`, `--induce wall-clock`, `--induce scope`.  
-Run without `--induce` for the happy path (exits 0).
-
----
-
 ## Install
 
 The agent-side install is one package. The control plane runs separately (locally for development, or as a service in production).
@@ -77,31 +61,23 @@ The agent-side install is one package. The control plane runs separately (locall
 ### Agent side (Hermes)
 
 ```bash
+pip install hermes-agent       # if you don't already run Hermes
 pip install caspase-hermes
+hermes plugins enable caspase
 ```
 
-Drop the plugin into Hermes:
-
-```bash
-python -c "
-import caspase_hermes, pathlib, shutil
-src = pathlib.Path(caspase_hermes.__file__).parent
-dst = pathlib.Path.home() / '.hermes' / 'plugins' / 'caspase'
-shutil.copytree(src, dst, dirs_exist_ok=True)
-print('installed →', dst)
-"
-```
+Hermes auto-discovers `caspase-hermes` via the `hermes_agent.plugins` entry-point group — no directory copy required. The `plugins enable` step is needed because Hermes plugins are opt-in by default; alternatively, add `caspase` to `plugins.enabled` in `~/.hermes/config.yaml`.
 
 Configure via environment variables (or `~/.hermes/.env`):
 
 ```bash
 export CASPASE_API_KEY=sk-...
-export CASPASE_BASE_URL=https://your-control-plane.example.com
-export CASPASE_AGENT_NAME=my-coding-agent     # optional display name
-export CASPASE_POLICY=coding-default          # optional policy
+export CASPASE_BASE_URL=https://your-control-plane.example.com  # optional, default localhost:8000
+export CASPASE_AGENT_NAME=my-coding-agent                       # optional display name
+export CASPASE_POLICY=coding-default                            # optional policy
 ```
 
-Then run Hermes normally. Caspase activates automatically.
+Then run Hermes normally. Caspase activates automatically — every tool call and LLM turn is supervised, and the death certificate is posted to the control plane on session end.
 
 ### Control plane (local development)
 
@@ -168,7 +144,7 @@ caspase grants revoke <grant_id>             # idempotent revoke
 ## What's in a death certificate
 
 - **Symptom log** — every check that fired, with detail payloads.
-- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter (arms a `tool_override` kill stub at the next tool boundary, triggering controlled shutdown via the Hermes runtime).
+- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter returns Hermes' block directive (`{"action": "block", "message": "caspase apoptosis: <reason>"}`) on every subsequent tool call, halting further execution while the agent's loop winds down naturally.
 - **Cost summary** — input/output tokens per model, USD.
 - **Tool signature window** — the last 20 tool calls with their argument hashes (this is what the loop check reads).
 - **Feedback URL** — one-click "this kill was right / wrong" so verdicts compound over time. Token is single-use, expires, and the hash is symmetric on both ends.
