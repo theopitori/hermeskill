@@ -18,11 +18,34 @@ def test_terminated_is_caspase_error() -> None:
     assert exc.kill_event_id == "ke_abc"
 
 
-def test_checkpoint_not_yet_implemented() -> None:
+def test_checkpoint_noop_without_watcher() -> None:
     from caspase import checkpoint
+    from caspase.watcher import _reset_registry_for_tests
 
-    with pytest.raises(NotImplementedError):
-        checkpoint()
+    _reset_registry_for_tests()
+    checkpoint()
+
+
+def test_checkpoint_raises_when_flag_set() -> None:
+    from uuid import uuid4
+
+    from caspase import checkpoint
+    from caspase.policies import resolve_policy
+    from caspase.watcher import _REGISTRY, WatcherState, _reset_registry_for_tests
+
+    _reset_registry_for_tests()
+    state = WatcherState(
+        agent_id=uuid4(),
+        name="test-checkpoint",
+        policy=resolve_policy("coding-default"),
+    )
+    _REGISTRY[state.agent_id] = state
+    try:
+        state.request_termination("loop_detected")
+        with pytest.raises(CaspaseTerminated, match="loop_detected"):
+            checkpoint()
+    finally:
+        _reset_registry_for_tests()
 
 
 def test_cli_import() -> None:

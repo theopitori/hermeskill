@@ -2,7 +2,7 @@
 name = "caspase-workspace"
 version = "0.0.0"
 description = "Caspase — agent supervision via the apoptosis protocol"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -20,11 +20,12 @@ dev = [
     "pytest-asyncio>=0.24",
     "hypothesis>=6.112",
     "httpx>=0.27",
+    "aiosqlite>=0.20",
 ]
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py311"
 extend-exclude = ["**/migrations/versions/*.py"]
 
 [tool.ruff.lint]
@@ -32,7 +33,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "PTH", "RUF"]
 ignore = ["E501", "B008", "RUF002"]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.11"
 strict = true
 exclude = ["migrations/"]
 
