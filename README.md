@@ -54,6 +54,24 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
+## Try it
+
+Clone the repo and run one command — Caspase spins up a local control plane
+and demonstrates killing a runaway agent in under 10 seconds:
+
+```bash
+git clone https://github.com/seijeupessoal-ui/Caspase.git
+cd Caspase && uv sync
+uv run python demo/coding_agent/agent.py --induce loop
+```
+
+![Caspase killing a looping agent](docs/demo.gif)
+
+Try the other failure modes: `--induce cost`, `--induce wall-clock`, `--induce scope`.  
+Run without `--induce` for the happy path (exits 0).
+
+---
+
 ## Install
 
 The agent-side install is one package. The control plane runs separately (locally for development, or as a service in production).

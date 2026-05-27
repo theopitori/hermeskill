@@ -10,31 +10,25 @@ ASGITransport) backed by Postgres. Verifies the full pipeline:
         → POST /agents/{id}/events
         → GET  /agents/{id}/events  (the SDK reading back)
 
-These tests are currently SKIPPED — they depend on `demo.coding_agent`,
-which was removed during the M6-H Hermes pivot. Test bodies are preserved
-as the executable spec for the eventual rebuild. Unskip once the new
-coding-agent demo lands.
+Requires a running Postgres via CASPASE_DB_URL (same as the other
+control-plane tests). The demo's standalone CLI uses SQLite + in-process
+uvicorn — that setup lives in demo/coding_agent/_bootstrap.py and is
+independent of these tests.
 """
 
+from typing import Any
+
+import httpx
 import pytest
-
-pytestmark = pytest.mark.skip(
-    reason="demo.coding_agent was removed during the M6-H Hermes pivot; "
-    "re-enable when the rebuilt coding-agent demo lands"
-)
-
-from typing import Any  # noqa: E402
-
-import httpx  # noqa: E402
-from caspase import watch  # noqa: E402
-from caspase.client import CaspaseClient  # noqa: E402
-from caspase.types import EventType  # noqa: E402
-from caspase.watcher import (  # noqa: E402
+from caspase import watch
+from caspase.client import CaspaseClient
+from caspase.types import EventType
+from caspase.watcher import (
     BackgroundWorker,
     _reset_registry_for_tests,
 )
-from control_plane.main import app  # noqa: E402
-from sqlalchemy import text  # noqa: E402
+from control_plane.main import app
+from sqlalchemy import text
 
 DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
 
@@ -84,7 +78,7 @@ async def test_full_register_events_heartbeat_query_loop(
         # --- 2. Invoke the demo graph — fires lifecycle + tool callbacks ---
         result = await watched.ainvoke({"task": "fix the bug"})
         assert result["edits_made"] == 1
-        assert result["files_read"] == ["dummy.py"]
+        assert result["files_read"] == ["auth.py"]
 
         # --- 3. Stop the worker — this drains pending events to the server ---
         await BackgroundWorker.stop()
