@@ -223,6 +223,9 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "aiosqlite" },
+    { name = "caspase" },
+    { name = "caspase-control-plane" },
+    { name = "caspase-hermes" },
     { name = "hermes-agent" },
     { name = "httpx" },
     { name = "hypothesis" },
@@ -237,6 +240,9 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.20" },
+    { name = "caspase", editable = "packages/caspase-sdk" },
+    { name = "caspase-control-plane", editable = "packages/caspase-control-plane" },
+    { name = "caspase-hermes", editable = "packages/caspase-hermes" },
     { name = "hermes-agent", specifier = ">=0.14" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "hypothesis", specifier = ">=6.112" },
