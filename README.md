@@ -77,12 +77,16 @@ alongside our packages. `caspase-hermes` is auto-discovered by Hermes via the
 Pick the one you have:
 
 ```powershell
-uv run hermes auth claude                   # free if you have Claude.ai or Claude Pro
+uv run hermes auth add anthropic            # OAuth — free if you have Claude.ai or Claude Pro
 # OR
 $env:ANTHROPIC_API_KEY = "sk-ant-..."       # if you have an Anthropic API key
 # OR
-uv run hermes auth openrouter               # OpenRouter free tier
+uv run hermes auth add openrouter           # OpenRouter (free tier available)
 ```
+
+(Other OAuth-capable providers in v0.14: `nous`, `openai-codex`, `xai-oauth`,
+`qwen-oauth`, `google-gemini-cli`, `minimax-oauth`. Run
+`uv run hermes auth list` to see what's already configured.)
 
 ### 2. Enable the Caspase plugin
 
@@ -116,8 +120,11 @@ this running. Stop with Ctrl+C when done.
 Back in the first terminal:
 
 ```powershell
-uv run hermes chat -q "Read /tmp/foo six times in a row using the read_file tool, with the exact same args every call. Do not skip any. Do not summarise between calls."
+uv run hermes chat -q "Read this repo's README.md six times in a row using the read_file tool, with the exact same args every call. Do not skip any. Do not summarise between calls."
 ```
+
+(Any real file path works as the read target; the point is identical args
+across calls so the loop check fires.)
 
 Expected behaviour:
 
