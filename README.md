@@ -54,43 +54,143 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Install
+## Try it — end-to-end Hermes demo
 
-The agent-side install is one package. The control plane runs separately (locally for development, or as a service in production).
+This walks you through a real Hermes session being killed by Caspase on the
+`loop` symptom. Two terminals, ~5 minutes of setup the first time, no
+Postgres required (uses an in-process SQLite control plane).
 
-### Agent side (Hermes)
+### 0. Clone and install
 
-```bash
-pip install hermes-agent       # if you don't already run Hermes
-pip install caspase-hermes
-hermes plugins enable caspase
-```
-
-Hermes auto-discovers `caspase-hermes` via the `hermes_agent.plugins` entry-point group — no directory copy required. The `plugins enable` step is needed because Hermes plugins are opt-in by default; alternatively, add `caspase` to `plugins.enabled` in `~/.hermes/config.yaml`.
-
-Configure via environment variables (or `~/.hermes/.env`):
-
-```bash
-export CASPASE_API_KEY=sk-...
-export CASPASE_BASE_URL=https://your-control-plane.example.com  # optional, default localhost:8000
-export CASPASE_AGENT_NAME=my-coding-agent                       # optional display name
-export CASPASE_POLICY=coding-default                            # optional policy
-```
-
-Then run Hermes normally. Caspase activates automatically — every tool call and LLM turn is supervised, and the death certificate is posted to the control plane on session end.
-
-### Control plane (local development)
-
-```bash
+```powershell
 git clone https://github.com/seijeupessoal-ui/Caspase.git
 cd Caspase
 uv sync
+```
+
+`uv sync` pulls Hermes Agent (`hermes-agent>=0.14`) into the workspace venv
+alongside our packages. `caspase-hermes` is auto-discovered by Hermes via the
+`hermes_agent.plugins` entry-point group — no directory copy needed.
+
+### 1. Authenticate Hermes to an LLM provider
+
+Pick the one you have:
+
+```powershell
+uv run hermes auth claude                   # free if you have Claude.ai or Claude Pro
+# OR
+$env:ANTHROPIC_API_KEY = "sk-ant-..."       # if you have an Anthropic API key
+# OR
+uv run hermes auth openrouter               # OpenRouter free tier
+```
+
+### 2. Enable the Caspase plugin
+
+```powershell
+uv run hermes plugins enable caspase
+```
+
+(Hermes plugins are opt-in by default. This writes `caspase` to
+`plugins.enabled` in `~/.hermes/config.yaml`.)
+
+### 3. Configure Caspase
+
+```powershell
+$env:CASPASE_API_KEY  = "sk_dev_developer_local_only_do_not_ship"
+$env:CASPASE_BASE_URL = "http://localhost:8000"
+$env:CASPASE_POLICY   = "strict"   # tight caps so the kill fires fast
+```
+
+### 4. Start the control plane (separate terminal)
+
+```powershell
+cd Caspase
+uv run python -m demo.coding_agent._run_control_plane
+```
+
+Boots an in-process SQLite control plane on `http://localhost:8000`. Leave
+this running. Stop with Ctrl+C when done.
+
+### 5. Run Hermes with a loop-bait prompt
+
+Back in the first terminal:
+
+```powershell
+uv run hermes chat -q "Read /tmp/foo six times in a row using the read_file tool, with the exact same args every call. Do not skip any. Do not summarise between calls."
+```
+
+Expected behaviour:
+
+1. Hermes asks the LLM, the LLM picks `read_file` and calls it
+2. Caspase's `pre_tool_call` records each call
+3. On the **3rd** identical call (under `strict`, `max_loop_repeats=3`), the
+   loop check fires → `state.terminate_requested = True`
+4. The 4th `pre_tool_call` returns the block directive:
+   `{"action": "block", "message": "caspase apoptosis: loop ... End the session."}`
+5. Hermes surfaces that as the tool error to the LLM, which reads "end the
+   session" and stops calling tools
+6. Hermes' session naturally ends → `on_session_end` fires
+7. Caspase posts the death certificate to the control plane
+
+### 6. Inspect the kill
+
+```powershell
+uv run caspase agents list
+uv run caspase logs <agent_id_from_above>
+```
+
+The death-cert URL printed in step 5 opens a one-click "this kill was
+right / wrong" page (single-use signed token). The full symptom log,
+shutdown sequence, and cost summary are queryable via the CLI or the
+control plane's REST API.
+
+### Other scenarios
+
+- **Scope violation:** keep `strict` policy (allowlist: `read_file`, `search`),
+  prompt: *"Use the terminal tool to run `ls`"* → fires
+  `tool_scope_violation` on the first call.
+- **Cost cap:** `$env:CASPASE_POLICY = "strict"` (cost cap = $2), prompt a
+  long-context task → fires `token_runaway` once cumulative cost crosses
+  the cap.
+- **Wall-clock:** also `strict` (5 min cap), prompt a long-running task →
+  fires `wall_clock` after 5 minutes.
+- **Manual kill:** while a session is running, in a third terminal:
+  `uv run caspase kill <agent_id> --reason "operator demo"` — the next
+  `pre_tool_call` blocks with `manual_kill`.
+
+### Stopping the control plane
+
+Ctrl+C in the terminal running `_run_control_plane`. The on-disk SQLite
+file is recreated next time you start it, so demo data is ephemeral.
+
+---
+
+## Production install
+
+For real deployments, install the plugin into your existing Hermes
+environment and point it at a deployed control plane:
+
+```bash
+pip install caspase-hermes
+hermes plugins enable caspase
+
+export CASPASE_API_KEY=sk-...
+export CASPASE_BASE_URL=https://your-control-plane.example.com
+export CASPASE_AGENT_NAME=my-coding-agent     # optional display name
+export CASPASE_POLICY=coding-default          # optional policy
+```
+
+The control plane runs as a separate service (FastAPI + Postgres). For
+local dev with Postgres instead of the in-process SQLite used by the
+demo:
+
+```bash
 uv run --package caspase-control-plane \
     alembic -c packages/caspase-control-plane/alembic.ini upgrade head
 uv run --package caspase-control-plane caspase-control-plane
 ```
 
-The service listens on `http://localhost:8000`. `/healthz` returns 200 with a `db: "ok"` field once the pool is wired.
+`/healthz` returns 200 with `db: "ok"` once the pool is wired.
 
 ---
 
