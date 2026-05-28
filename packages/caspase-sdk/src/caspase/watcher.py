@@ -100,6 +100,15 @@ class WatcherState:
     # separate enum bit.
     manual_kill: dict[str, Any] | None = None
 
+    # Control-plane connectivity. True when the agent registered in
+    # local-only mode because the control plane was unreachable at setup
+    # (see CaspasePlugin.setup). In-process symptom checks still run and the
+    # L2 watchdog still enforces; only control-plane-backed features
+    # (operator visibility, manual kill, grants, death-cert archival) are
+    # unavailable. The agent_id in this mode is a locally-minted UUID the
+    # control plane has no record of.
+    offline: bool = False
+
     # Append-only forensic log — populated by `record_shutdown_step()`
     # during the apoptosis sequence (cert built, hook ran, etc.). Goes
     # into the death cert.

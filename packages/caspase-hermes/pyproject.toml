@@ -13,9 +13,26 @@ dependencies = [
 Homepage = "https://github.com/seijeupessoal-ui/Caspase"
 Documentation = "https://github.com/seijeupessoal-ui/Caspase#readme"
 
+# Hermes Agent plugin auto-discovery: when this package is installed,
+# Hermes finds it via importlib.metadata. The loader does
+# `module = ep.load(); getattr(module, "register")` — so the entry-point
+# value must resolve to the MODULE (which exposes register(ctx)), NOT the
+# function itself. Pointing at `caspase_hermes:register` would make
+# ep.load() return the function, and getattr(function, "register") is
+# None → "no register() function". See hermes_cli/plugins.py
+# ::_load_entrypoint_module + _load_plugin.
+[project.entry-points."hermes_agent.plugins"]
+caspase = "caspase_hermes"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/caspase_hermes"]
+
+# Ship plugin.yaml inside the wheel so the directory-install path
+# (cp -r into ~/.hermes/plugins/caspase/) also has a valid manifest.
+# Entry-point installs don't read this file but won't reject it either.
+[tool.hatch.build.targets.wheel.force-include]
+"src/caspase_hermes/plugin.yaml" = "caspase_hermes/plugin.yaml"

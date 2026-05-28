@@ -1,28 +1,30 @@
 """Thin adapter: Hermes hook payloads → WatcherState mutations.
 
 Each function in this module translates one Hermes lifecycle event into the
-appropriate `WatcherState` mutation (record_tool_call, record_llm_call, etc.)
+appropriate ``WatcherState`` mutation (record_tool_call, record_llm_call, etc.)
 and then runs the Caspase checks, returning a kill verdict if apoptosis fires.
 
 These are **pure functions over state** — they do not talk to the control
-plane, do not raise, and do not side-effect outside the passed `state`. The
-plugin layer (plugin.py) owns control-plane interaction and the tool_override
-kill trigger.
+plane, do not raise, and do not side-effect outside the passed ``state``. The
+plugin layer (``plugin.py``) owns control-plane interaction and translates a
+kill verdict into Hermes' block directive.
 
-Hermes hook callback signatures assumed (v0.14):
+Hermes hook payload shapes (v0.14, from ``hermes_cli/hooks.py::_DEFAULT_PAYLOADS``):
 
-    pre_tool_call(ctx, tool_name: str, inputs: dict) -> None
-    post_tool_call(ctx, tool_name: str, inputs: dict, output: Any) -> None
-    pre_llm_call(ctx, messages: list, model: str) -> None
-    post_llm_call(ctx, messages: list, model: str, response: Any) -> None
-    on_session_end(ctx) -> None
+    pre_tool_call(*, tool_name, args, session_id, task_id, tool_call_id)
+    post_tool_call(*, tool_name, args, session_id, task_id, tool_call_id,
+                   result, duration_ms)
+    pre_llm_call(*, session_id, user_message, conversation_history,
+                 is_first_turn, model, platform)
+    post_api_request(*, session_id, task_id, platform, model, provider,
+                     base_url, api_mode, api_call_count, api_duration,
+                     finish_reason, message_count, response_model,
+                     usage, assistant_content_chars, assistant_tool_call_count)
+    on_session_end(*, session_id)
 
-The `ctx` object exposes:
-    ctx.register_hook(event_name, callback)  — called at register() time
-    ctx.tool_override(tool_name, replacement) — swap a tool implementation
-
-Usage of ctx is intentionally isolated to plugin.py; bridge.py only touches
-WatcherState so that unit-testing the bridge never requires a live Hermes ctx.
+We register against ``post_api_request`` rather than ``post_llm_call`` because
+the canonical ``post_llm_call`` payload carries no token-usage information
+in v0.14 — usage lands on ``post_api_request.usage``.
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ logger = logging.getLogger("caspase_hermes.bridge")
 def on_pre_tool_call(
     state: WatcherState,
     tool_name: str,
-    inputs: Any,
+    args: Any,
 ) -> list[Terminal | Warning]:
     """Pre-tool boundary checkpoint.
 
@@ -55,8 +57,8 @@ def on_pre_tool_call(
     3. Run state checks (loop, cost, wall-clock).
 
     Returns all non-Healthy verdicts (with grants applied). An empty list
-    means all checks passed. The caller (plugin.py) decides whether to
-    trigger tool_override based on the returned list.
+    means all checks passed. The caller (plugin.py) translates any Terminal
+    into Hermes' block directive.
     """
     verdicts: list[Terminal | Warning] = []
 
@@ -68,7 +70,7 @@ def on_pre_tool_call(
         verdicts.append(scope)
 
     try:
-        state.record_tool_call(tool_name, inputs)
+        state.record_tool_call(tool_name, args)
     except Exception:
         logger.exception("bridge.on_pre_tool_call: failed to record tool call")
 
@@ -102,8 +104,8 @@ def on_pre_tool_call(
 def on_post_tool_call(
     state: WatcherState,
     tool_name: str,
-    inputs: Any,
-    output: Any,
+    args: Any,
+    result: Any,
 ) -> None:
     """Post-tool — record outcome; run checks again (cost/wall_clock may have
     ticked while the tool ran)."""
@@ -124,36 +126,33 @@ def on_post_tool_call(
             )
 
 
-def on_pre_llm_call(
-    state: WatcherState,
-    model: str,
-    messages: Any,
-) -> None:
-    """Pre-LLM — snapshot the model name so post_llm_call can attribute cost."""
+def on_pre_llm_call(state: WatcherState, model: str) -> None:
+    """Pre-LLM — lifecycle marker. Token info lands on post_api_request."""
     try:
         state.record_lifecycle("llm_start", model=model)
     except Exception:
         logger.exception("bridge.on_pre_llm_call: failed to record")
 
 
-def on_post_llm_call(
+def on_post_api_request(
     state: WatcherState,
     model: str,
     input_tokens: int,
     output_tokens: int,
 ) -> None:
-    """Post-LLM — update token/cost counters; run checks."""
+    """Post-API-request — update token/cost counters from the ``usage`` dict
+    Hermes carries on this hook; run checks."""
     try:
         state.record_llm_call(model, input_tokens, output_tokens)
     except Exception:
-        logger.exception("bridge.on_post_llm_call: failed to record")
+        logger.exception("bridge.on_post_api_request: failed to record")
 
     verdicts = apply_grants(run_all(state, state.policy), state.grants)
     for v in verdicts:
         if isinstance(v, Terminal) and not state.terminate_requested:
             state.request_termination(v.reason)
             logger.warning(
-                "caspase: agent %s entering apoptosis post-llm: %s (%s)",
+                "caspase: agent %s entering apoptosis post-api-request: %s (%s)",
                 state.agent_id,
                 v.symptom.value,
                 v.reason,
@@ -168,12 +167,3 @@ def on_session_end(state: WatcherState) -> None:
         state.record_shutdown_step("hermes_session_ended")
     except Exception:
         logger.exception("bridge.on_session_end: failed to record")
-
-
-# --- helpers ------------------------------------------------------------------
-
-
-def _is_healthy(result: Any) -> bool:
-    """Duck-type check: True for the HEALTHY sentinel and any Healthy instance."""
-    from caspase.checks import Healthy
-    return isinstance(result, Healthy)

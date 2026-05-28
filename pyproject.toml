@@ -21,6 +21,18 @@ dev = [
     "hypothesis>=6.112",
     "httpx>=0.27",
     "aiosqlite>=0.20",
+    # Workspace members — listed here so a bare `uv sync` (without
+    # --all-packages) installs them editable into the venv. Without these,
+    # `uv sync` would only install the workspace root, leaving caspase /
+    # caspase-control-plane / caspase-hermes uninstalled — and Hermes'
+    # entry-point scan would not discover the plugin.
+    "caspase",
+    "caspase-control-plane",
+    "caspase-hermes",
+    # Real Hermes Agent in the workspace venv so 'uv run hermes ...' discovers
+    # our caspase-hermes plugin via the hermes_agent.plugins entry-point group.
+    # See README "Try it" section for the integration walkthrough.
+    "hermes-agent>=0.14",
 ]
 
 [tool.ruff]

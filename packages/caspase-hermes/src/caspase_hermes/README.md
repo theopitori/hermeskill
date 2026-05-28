@@ -1,9 +1,9 @@
 # caspase-hermes
 
-[Caspase](https://github.com/seijeupessoal-ui/Caspase) apoptosis supervision for
-[Hermes Agent](https://github.com/NousResearch/hermes-agent). Drops in as a
-plugin: Caspase watches every tool call and LLM turn in your Hermes session and
-terminates the agent cleanly if it enters a runaway loop, exceeds its
+[Caspase](https://github.com/seijeupessoal-ui/Caspase) apoptosis supervision
+for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Drops in as
+a plugin: Caspase watches every tool call and LLM turn in your Hermes session
+and terminates the agent cleanly if it enters a runaway loop, exceeds its
 cost/token cap, runs past a wall-clock deadline, or calls a tool outside the
 policy allowlist.
 
@@ -13,23 +13,28 @@ policy allowlist.
 pip install caspase-hermes
 ```
 
-Then drop the plugin into Hermes:
+Hermes auto-discovers the plugin via the `hermes_agent.plugins` entry-point
+group — no directory copy required. Plugins are opt-in, so enable it by adding
+`caspase` to `plugins.enabled` in your Hermes config:
 
-```bash
-python -c "
-import caspase_hermes, pathlib, shutil
-src = pathlib.Path(caspase_hermes.__file__).parent
-dst = pathlib.Path.home() / '.hermes' / 'plugins' / 'caspase'
-shutil.copytree(src, dst, dirs_exist_ok=True)
-print('installed →', dst)
-"
+```yaml
+# ~/.hermes/config.yaml  (Windows: %LOCALAPPDATA%\hermes\config.yaml)
+plugins:
+  enabled:
+    - caspase
 ```
+
+> **Note:** `hermes plugins enable caspase` and the interactive `hermes
+> plugins` UI only manage **git-installed** plugins under `~/.hermes/plugins/`.
+> They do not list pip-installed (entry-point) plugins like this one — enable
+> those via the `plugins.enabled` config key above. Once the name is there,
+> Hermes discovers and loads the plugin automatically at session start.
 
 ## Configure
 
 ```bash
 export CASPASE_API_KEY=sk-...
-export CASPASE_BASE_URL=https://your-control-plane.example.com  # optional
+export CASPASE_BASE_URL=https://your-control-plane.example.com  # optional, default localhost:8000
 export CASPASE_AGENT_NAME=my-coding-agent                       # optional display name
 export CASPASE_POLICY=coding-default                            # optional policy
 ```
@@ -42,7 +47,8 @@ Or add the same keys to `~/.hermes/.env`.
 hermes
 ```
 
-Caspase activates automatically. Every session is queryable via the operator CLI (`caspase agents list`).
+Caspase activates automatically. Every session is queryable via the operator
+CLI (`caspase fleet`).
 
 ## What it does
 
@@ -55,8 +61,27 @@ Caspase activates automatically. Every session is queryable via the operator CLI
 | Operator issues `caspase kill <agent_id>` | Kill (`manual_kill`) |
 | Operator issues a grant | Suppress one symptom type for up to 24 h |
 
-On kill, Caspase posts a death certificate with a full symptom log, shutdown
-sequence, and a one-click feedback URL so operators can label the verdict.
+## How the kill works
+
+Hermes hooks are non-blocking — they can't raise out of the agent loop.
+Caspase uses Hermes' canonical interception path: when an apoptosis check
+fires, the plugin's `pre_tool_call` callback returns
+
+```python
+{"action": "block", "message": "caspase apoptosis: <reason>. End the session."}
+```
+
+Hermes refuses to run the tool and surfaces that message as the tool error
+to the LLM. The harm is halted **immediately** — no further tool execution,
+no further cost — and every subsequent tool call also blocks until the
+agent's loop ends naturally. At session end, `on_session_end` fires and the
+plugin posts a death certificate (full symptom log, shutdown sequence,
+feedback URL) to the control plane.
+
+This is the same pattern Hermes' built-in `security-guidance` plugin uses
+for its strict block mode, and it's documented in PR #26759 as the canonical
+interception path for "rate limiting, security restrictions, approval
+workflows."
 
 ## Policies
 
@@ -71,15 +96,27 @@ Shipped defaults:
 ## Operator CLI
 
 ```bash
-caspase agents list
+caspase fleet
 caspase logs <agent_id>
 caspase kill <agent_id> --reason "infinite loop in file search"
-caspase grants create <agent_id> --symptom loop --duration 1h --reason "known flaky task"
-caspase grants revoke <grant_id>
+caspase grant <agent_id> --symptoms loop --duration 1h --reason "known flaky task"
+caspase revoke <grant_id>
 ```
 
 See the [repo root README](https://github.com/seijeupessoal-ui/Caspase#readme)
 for the full operator workflow, security model, and deployment guide.
+
+## Hermes hooks used
+
+The plugin attaches to five hooks (see `hermes_cli/plugins.py::VALID_HOOKS`):
+
+| Hook | Why |
+|---|---|
+| `pre_tool_call` | The checkpoint — runs all symptom checks; returns the block directive if armed |
+| `post_tool_call` | Records tool outcome; re-runs cost/wall-clock checks |
+| `pre_llm_call` | Lifecycle marker (model name) |
+| `post_api_request` | Token + cost accounting (this hook carries `usage` in v0.14, not `post_llm_call`) |
+| `on_session_end` | Flush death cert, tear down background worker |
 
 ## License
 

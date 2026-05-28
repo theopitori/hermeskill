@@ -26,9 +26,13 @@ def make_policy(**overrides: object) -> Policy:
 
 
 def make_ctx() -> MagicMock:
-    """Mock Hermes plugin context."""
+    """Mock Hermes plugin context.
+
+    Real Hermes builds this in hermes_cli/plugins.py::PluginContext. We only
+    need register_hook for our tests; the plugin no longer touches ctx after
+    register() returns (no tool_override path).
+    """
     ctx = MagicMock()
-    ctx.tool_override = MagicMock()
     ctx.register_hook = MagicMock()
     return ctx
 

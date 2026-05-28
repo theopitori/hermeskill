@@ -12,8 +12,8 @@ Coverage:
 - on_pre_tool_call: Terminal demoted to Warning when grant applies (M5)
 - on_post_tool_call: records lifecycle + re-runs checks
 - on_pre_llm_call: records lifecycle event
-- on_post_llm_call: updates token/cost counters
-- on_post_llm_call: cost Terminal fires after token accumulation
+- on_post_api_request: updates token/cost counters
+- on_post_api_request: cost Terminal fires after token accumulation
 - on_session_end: records lifecycle + shutdown step
 - First-cause wins across multiple verdicts
 """
@@ -24,7 +24,7 @@ from caspase.checks import Terminal
 from caspase.types import EventType, SymptomType
 from caspase.watcher import WatcherState
 from caspase_hermes.bridge import (
-    on_post_llm_call,
+    on_post_api_request,
     on_post_tool_call,
     on_pre_llm_call,
     on_pre_tool_call,
@@ -52,9 +52,9 @@ def test_pre_tool_call_populates_loop_buffer(state: WatcherState) -> None:
 def test_pre_tool_call_loop_terminal_fires(state: WatcherState) -> None:
     policy = make_policy(max_loop_repeats=3, loop_window_actions=10)
     s = make_state(policy)
-    inputs = {"path": "/tmp/loop"}
+    args = {"path": "/tmp/loop"}
     for _ in range(3):
-        on_pre_tool_call(s, "read_file", inputs)
+        on_pre_tool_call(s, "read_file", args)
     assert s.terminate_requested
     assert s.terminate_reason is not None
     assert "LOOP" in s.terminate_reason.upper() or "loop" in s.terminate_reason.lower() or "repeated" in s.terminate_reason
@@ -84,9 +84,9 @@ def test_pre_tool_call_grant_demotes_terminal() -> None:
     s = make_state(policy)
     grant_id = str(_uuid4())
     s.grants = [{"id": grant_id, "symptoms": ["loop"], "expires_at": "2099-01-01T00:00:00+00:00", "reason": "test grant"}]
-    inputs = {"path": "/tmp/loop"}
+    args = {"path": "/tmp/loop"}
     for _ in range(3):
-        on_pre_tool_call(s, "read_file", inputs)
+        on_pre_tool_call(s, "read_file", args)
     # Grant should suppress the loop Terminal → Warning; agent stays alive
     assert not s.terminate_requested
 
@@ -116,23 +116,23 @@ def test_post_tool_call_does_not_fire_on_clean_state(state: WatcherState) -> Non
 
 
 def test_pre_llm_call_records_lifecycle(state: WatcherState) -> None:
-    on_pre_llm_call(state, "claude-opus-4-7", [{"role": "user", "content": "hi"}])
+    on_pre_llm_call(state, "claude-opus-4-7")
     events = state.drain_events()
     lifecycle = [e for e in events if e.type == EventType.LIFECYCLE]
     assert any(e.payload.get("phase") == "llm_start" for e in lifecycle)
 
 
-# --- on_post_llm_call --------------------------------------------------------
+# --- on_post_api_request -----------------------------------------------------
 
 
-def test_post_llm_call_updates_token_counters(state: WatcherState) -> None:
-    on_post_llm_call(state, "claude-opus-4-7", 100, 50)
+def test_post_api_request_updates_token_counters(state: WatcherState) -> None:
+    on_post_api_request(state, "claude-opus-4-7", 100, 50)
     assert state.total_input_tokens == 100
     assert state.total_output_tokens == 50
 
 
-def test_post_llm_call_records_llm_event(state: WatcherState) -> None:
-    on_post_llm_call(state, "claude-opus-4-7", 100, 50)
+def test_post_api_request_records_llm_event(state: WatcherState) -> None:
+    on_post_api_request(state, "claude-opus-4-7", 100, 50)
     events = state.drain_events()
     llm_events = [e for e in events if e.type == EventType.LLM_CALL]
     assert len(llm_events) == 1
@@ -140,10 +140,10 @@ def test_post_llm_call_records_llm_event(state: WatcherState) -> None:
     assert llm_events[0].payload["input_tokens"] == 100
 
 
-def test_post_llm_call_cost_terminal_fires() -> None:
+def test_post_api_request_cost_terminal_fires() -> None:
     policy = make_policy(max_cost_usd=0.00001)
     s = make_state(policy)
-    on_post_llm_call(s, "claude-opus-4-7", 1_000_000, 1_000_000)
+    on_post_api_request(s, "claude-opus-4-7", 1_000_000, 1_000_000)
     assert s.terminate_requested
 
 
@@ -171,9 +171,9 @@ def test_first_cause_wins_across_verdicts() -> None:
     # Cost cap already exceeded
     s.total_cost_usd = 1.0
     # Trigger loop too
-    inputs = {"path": "/tmp/x"}
+    args = {"path": "/tmp/x"}
     for _ in range(3):
-        on_pre_tool_call(s, "read_file", inputs)
+        on_pre_tool_call(s, "read_file", args)
     first_reason = s.terminate_reason
     assert first_reason is not None
     # Subsequent calls don't overwrite first reason
