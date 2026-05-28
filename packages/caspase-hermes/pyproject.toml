@@ -10,8 +10,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/theopidori/Caspase"
-Documentation = "https://github.com/theopidori/Caspase#readme"
+Homepage = "https://github.com/theopidori/caspase"
+Documentation = "https://github.com/theopidori/caspase#readme"
 
 # Hermes Agent plugin auto-discovery: when this package is installed,
 # Hermes finds it via importlib.metadata. The loader does

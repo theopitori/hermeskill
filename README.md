@@ -63,8 +63,8 @@ Postgres required (uses an in-process SQLite control plane).
 ### 0. Clone and install
 
 ```powershell
-git clone https://github.com/theopidori/Caspase.git
-cd Caspase
+git clone https://github.com/theopidori/caspase.git
+cd caspase
 uv sync
 ```
 
@@ -124,7 +124,7 @@ $env:CASPASE_POLICY   = "strict"   # tight caps so the kill fires fast
 ### 4. Start the control plane (separate terminal)
 
 ```powershell
-cd Caspase
+cd caspase
 uv run python -m demo.coding_agent._run_control_plane
 ```
 
@@ -393,7 +393,7 @@ The control-plane tests connect to a real Postgres via `CASPASE_DB_URL`. Either 
 ## Repo layout
 
 ```
-Caspase/
+caspase/
 ├── packages/
 │   ├── caspase-sdk/                  # SDK: watcher, checks, client, CLI
 │   ├── caspase-control-plane/        # FastAPI service + Alembic migrations
@@ -416,8 +416,8 @@ Caspase/
 ## Contributing
 
 ```bash
-git clone https://github.com/theopidori/Caspase.git
-cd Caspase
+git clone https://github.com/theopidori/caspase.git
+cd caspase
 uv sync                                          # installs all workspace packages
 
 uv run pytest -q                                 # full suite
