@@ -206,10 +206,15 @@ def _print_event(ev: EventOut) -> None:
             up = ev.payload.get("uptime_seconds", 0.0)
             console.print(f"[dim]{ts}[/dim] [green]heartbeat[/green] up={up:.1f}s")
         case EventType.SYMPTOM:
-            stype = ev.payload.get("symptom_type", "?")
+            # Symptom events carry the type under "symptom" (see
+            # WatcherState.record_symptom); tolerate the legacy "symptom_type"
+            # key so older event rows still render.
+            stype = ev.payload.get("symptom") or ev.payload.get("symptom_type") or "?"
             sev = ev.payload.get("severity", "?")
+            reason = ev.payload.get("reason", "")
             color = "red" if sev == "terminal" else "yellow"
-            console.print(f"[dim]{ts}[/dim] [{color}]symptom[/{color}]   {stype} ({sev})")
+            suffix = f" [dim]{reason}[/dim]" if reason else ""
+            console.print(f"[dim]{ts}[/dim] [{color}]symptom[/{color}]   {stype} ({sev}){suffix}")
         case _:
             console.print(f"[dim]{ts}[/dim] {ev.type.value} {ev.payload}")
 

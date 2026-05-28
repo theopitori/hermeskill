@@ -74,19 +74,11 @@ alongside our packages. `caspase-hermes` is auto-discovered by Hermes via the
 
 ### 1. Authenticate Hermes to an LLM provider
 
-Pick the one you have:
-
-```powershell
-uv run hermes auth add anthropic            # OAuth — free if you have Claude.ai or Claude Pro
-# OR
-$env:ANTHROPIC_API_KEY = "sk-ant-..."       # if you have an Anthropic API key
-# OR
-uv run hermes auth add openrouter           # OpenRouter (free tier available)
-```
-
-(Other OAuth-capable providers in v0.14: `nous`, `openai-codex`, `xai-oauth`,
-`qwen-oauth`, `google-gemini-cli`, `minimax-oauth`. Run
-`uv run hermes auth list` to see what's already configured.)
+If Hermes isn't already authed, point it at whatever provider you have
+(`uv run hermes auth add anthropic`, an `ANTHROPIC_API_KEY` env var, OpenRouter,
+etc.). See the [Hermes docs](https://github.com/NousResearch/hermes-agent) for
+the provider list — Caspase is provider-agnostic and watches the session
+regardless of which model is behind it.
 
 ### 2. Enable the Caspase plugin
 
@@ -218,6 +210,22 @@ export CASPASE_BASE_URL=https://your-control-plane.example.com
 export CASPASE_AGENT_NAME=my-coding-agent     # optional display name
 export CASPASE_POLICY=coding-default          # optional policy
 ```
+
+> **Install into the same environment Hermes runs from.** Entry-point discovery
+> only sees packages in Hermes' own interpreter. A global Hermes (e.g. installed
+> via `uv tool install` or its standalone installer) lives in an *isolated*
+> venv, so a plain `pip install caspase-hermes` in your shell won't be visible
+> to it — the plugin silently won't load. Install into Hermes' venv directly:
+>
+> ```bash
+> # find where Hermes actually runs from:
+> python -c "import importlib.util as u; print(u.find_spec('hermes_cli').origin)"
+> # then install the plugin into that interpreter, e.g.:
+> uv pip install --python /path/to/hermes/venv/bin/python caspase-hermes
+> ```
+>
+> In the `uv sync` demo flow above this is a non-issue — Hermes and Caspase
+> share the workspace venv, so `uv run hermes` sees the plugin automatically.
 
 The control plane runs as a separate service (FastAPI + Postgres). For
 local dev with Postgres instead of the in-process SQLite used by the
@@ -356,6 +364,14 @@ uv run ruff check .
 
 **`caspase: command not found` after `pip install caspase-hermes`**
 The CLI ships in the `caspase` distribution (a transitive dep). Install via `uv tool install caspase` or `pipx install caspase` to get the CLI on your PATH, then keep the Hermes plugin install as documented above.
+
+**Caspase never activates — no `registered` event, no logs**
+The plugin isn't being discovered. Two usual causes: (1) `caspase` isn't in
+`plugins.enabled` in your Hermes config (see step 2 — and don't use `hermes
+plugins enable`, which only sees git-installed plugins); (2) `caspase-hermes`
+is installed in a different environment than the one Hermes runs from. A global
+Hermes uses its own isolated venv — install the plugin into *that* interpreter
+(see the install note under [Production install](#production-install)).
 
 **Control plane returns 401 on every request**
 Double-check `CASPASE_API_KEY` against the row in `api_keys`. The middleware does a real hashed-key lookup — there is no stub key path.

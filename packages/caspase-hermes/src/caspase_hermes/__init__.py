@@ -62,7 +62,6 @@ Public surface
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import Any
@@ -96,21 +95,12 @@ def register(ctx: Any) -> None:
 
     plugin = CaspasePlugin(name=name, policy=policy, client=client)
 
-    # Run async setup synchronously — Hermes calls register() outside of an
-    # async context. If an event loop is already running (e.g. in tests),
-    # surface a RuntimeError pointing the caller at async_register().
-    try:
-        asyncio.get_running_loop()
-        raise RuntimeError(
-            "caspase_hermes.register() was called from inside a running event loop. "
-            "If you are initialising Caspase from an async context, call "
-            "await caspase_hermes.async_register(ctx) instead."
-        )
-    except RuntimeError as exc:
-        if "no running event loop" in str(exc) or "no current event loop" in str(exc):
-            asyncio.run(plugin.setup())
-        else:
-            raise
+    # Run async setup on the plugin's own session loop thread. Hermes calls
+    # register() synchronously; plugin.start() blocks only the calling thread
+    # (never an event loop) until registration completes. Callers already
+    # inside a running loop should use async_register() instead, which awaits
+    # the same setup without blocking their loop.
+    plugin.start()
 
     _current_plugin = plugin
 
@@ -129,7 +119,7 @@ async def async_register(ctx: Any) -> None:
     client = CaspaseClient.from_config(config)
 
     plugin = CaspasePlugin(name=name, policy=policy, client=client)
-    await plugin.setup()
+    await plugin.astart()
 
     _current_plugin = plugin
 
