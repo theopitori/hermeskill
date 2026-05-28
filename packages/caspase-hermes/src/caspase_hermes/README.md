@@ -1,6 +1,6 @@
 # caspase-hermes
 
-[Caspase](https://github.com/seijeupessoal-ui/Caspase) apoptosis supervision
+[Caspase](https://github.com/theopidori/Caspase) apoptosis supervision
 for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Drops in as
 a plugin: Caspase watches every tool call and LLM turn in your Hermes session
 and terminates the agent cleanly if it enters a runaway loop, exceeds its
@@ -103,7 +103,7 @@ caspase grant <agent_id> --symptoms loop --duration 1h --reason "known flaky tas
 caspase revoke <grant_id>
 ```
 
-See the [repo root README](https://github.com/seijeupessoal-ui/Caspase#readme)
+See the [repo root README](https://github.com/theopidori/Caspase#readme)
 for the full operator workflow, security model, and deployment guide.
 
 ## Hermes hooks used
@@ -120,4 +120,4 @@ The plugin attaches to five hooks (see `hermes_cli/plugins.py::VALID_HOOKS`):
 
 ## License
 
-[MIT](https://github.com/seijeupessoal-ui/Caspase/blob/main/LICENSE) © 2026 Caspase Contributors
+[MIT](https://github.com/theopidori/Caspase/blob/main/LICENSE) © 2026 Caspase Contributors
