@@ -14,11 +14,15 @@ Homepage = "https://github.com/seijeupessoal-ui/Caspase"
 Documentation = "https://github.com/seijeupessoal-ui/Caspase#readme"
 
 # Hermes Agent plugin auto-discovery: when this package is installed,
-# Hermes finds it via importlib.metadata and calls register(ctx) at
-# session start. See hermes_cli/plugins.py::_scan_entry_points and the
-# ENTRY_POINTS_GROUP constant. No directory copy required.
+# Hermes finds it via importlib.metadata. The loader does
+# `module = ep.load(); getattr(module, "register")` — so the entry-point
+# value must resolve to the MODULE (which exposes register(ctx)), NOT the
+# function itself. Pointing at `caspase_hermes:register` would make
+# ep.load() return the function, and getattr(function, "register") is
+# None → "no register() function". See hermes_cli/plugins.py
+# ::_load_entrypoint_module + _load_plugin.
 [project.entry-points."hermes_agent.plugins"]
-caspase = "caspase_hermes:register"
+caspase = "caspase_hermes"
 
 [build-system]
 requires = ["hatchling"]

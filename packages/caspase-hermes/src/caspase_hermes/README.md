@@ -14,14 +14,21 @@ pip install caspase-hermes
 ```
 
 Hermes auto-discovers the plugin via the `hermes_agent.plugins` entry-point
-group — no directory copy required. Then enable it:
+group — no directory copy required. Plugins are opt-in, so enable it by adding
+`caspase` to `plugins.enabled` in your Hermes config:
 
-```bash
-hermes plugins enable caspase
+```yaml
+# ~/.hermes/config.yaml  (Windows: %LOCALAPPDATA%\hermes\config.yaml)
+plugins:
+  enabled:
+    - caspase
 ```
 
-(Or check the box in the interactive `hermes plugins` UI, or add `caspase` to
-`plugins.enabled` in `~/.hermes/config.yaml`. Plugins are opt-in by default.)
+> **Note:** `hermes plugins enable caspase` and the interactive `hermes
+> plugins` UI only manage **git-installed** plugins under `~/.hermes/plugins/`.
+> They do not list pip-installed (entry-point) plugins like this one — enable
+> those via the `plugins.enabled` config key above. Once the name is there,
+> Hermes discovers and loads the plugin automatically at session start.
 
 ## Configure
 
@@ -41,7 +48,7 @@ hermes
 ```
 
 Caspase activates automatically. Every session is queryable via the operator
-CLI (`caspase agents list`).
+CLI (`caspase fleet`).
 
 ## What it does
 
@@ -89,11 +96,11 @@ Shipped defaults:
 ## Operator CLI
 
 ```bash
-caspase agents list
+caspase fleet
 caspase logs <agent_id>
 caspase kill <agent_id> --reason "infinite loop in file search"
-caspase grants create <agent_id> --symptom loop --duration 1h --reason "known flaky task"
-caspase grants revoke <grant_id>
+caspase grant <agent_id> --symptoms loop --duration 1h --reason "known flaky task"
+caspase revoke <grant_id>
 ```
 
 See the [repo root README](https://github.com/seijeupessoal-ui/Caspase#readme)

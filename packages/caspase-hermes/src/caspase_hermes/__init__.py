@@ -7,11 +7,19 @@ Installation
 
 Hermes auto-discovers the plugin via the ``hermes_agent.plugins`` entry-point
 group declared in this package's ``pyproject.toml``. No directory copy is
-required. After install, enable it in Hermes:
+required. Plugins are opt-in, so enable it by adding ``caspase`` to
+``plugins.enabled`` in ``~/.hermes/config.yaml`` (Windows:
+``%LOCALAPPDATA%\\hermes\\config.yaml``)::
 
-    hermes plugins enable caspase
+    plugins:
+      enabled:
+        - caspase
 
-Or add ``caspase`` to ``plugins.enabled`` in ``~/.hermes/config.yaml``.
+Note: ``hermes plugins enable caspase`` and the interactive ``hermes plugins``
+UI only manage git-installed plugins under ``~/.hermes/plugins/`` — they do not
+list pip-installed (entry-point) plugins, which are enabled via the config key
+above. The runtime loader (PluginManager.discover_and_load) still honours
+``plugins.enabled`` for entry-point plugins.
 
 For the legacy directory-install path, copy this package into
 ``~/.hermes/plugins/caspase/`` (``plugin.yaml`` is shipped alongside the

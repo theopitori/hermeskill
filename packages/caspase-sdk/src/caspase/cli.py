@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 import time
 
 import typer
@@ -39,6 +40,16 @@ from caspase.types import (
     EventType,
     SymptomType,
 )
+
+# Windows consoles default to the cp1252 code page, which cannot encode the
+# Unicode glyphs (→, —, ✓, ⊘) used in our help text and Rich tables. Without
+# this, `caspase kill --help` and friends crash with UnicodeEncodeError and
+# `caspase fleet` prints replacement chars. reconfigure() exists on
+# TextIOWrapper (Python 3.7+); guard it so non-standard streams are left alone.
+# Must run before the Rich Console objects below capture sys.stdout.
+for _stream in (sys.stdout, sys.stderr):
+    with contextlib.suppress(Exception):
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
 app = typer.Typer(
     name="caspase",

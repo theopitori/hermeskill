@@ -6,7 +6,7 @@ Drop one plugin into your agent runtime and Caspase watches every tool call and 
 pip install caspase-hermes
 ```
 
-That's it. Start your Hermes Agent session and Caspase activates automatically. Every session is queryable via the operator CLI (`caspase agents list`, `caspase logs <id>`) and the control-plane HTTP API; every kill is explainable.
+That's it. Start your Hermes Agent session and Caspase activates automatically. Every session is queryable via the operator CLI (`caspase fleet`, `caspase logs <id>`) and the control-plane HTTP API; every kill is explainable.
 
 ---
 
@@ -90,12 +90,36 @@ uv run hermes auth add openrouter           # OpenRouter (free tier available)
 
 ### 2. Enable the Caspase plugin
 
+Hermes plugins are opt-in. Caspase is installed as a pip/entry-point plugin,
+so enable it by adding `caspase` to `plugins.enabled` in your Hermes config:
+
 ```powershell
-uv run hermes plugins enable caspase
+uv run python -c @"
+from hermes_cli.config import load_config, save_config
+cfg = load_config()
+enabled = cfg.setdefault('plugins', {}).setdefault('enabled', [])
+if 'caspase' not in enabled:
+    enabled.append('caspase')
+    save_config(cfg)
+print('plugins.enabled =', enabled)
+"@
 ```
 
-(Hermes plugins are opt-in by default. This writes `caspase` to
-`plugins.enabled` in `~/.hermes/config.yaml`.)
+Or edit the file by hand (`%LOCALAPPDATA%\hermes\config.yaml` on Windows,
+`~/.hermes/config.yaml` elsewhere):
+
+```yaml
+plugins:
+  enabled:
+    - caspase
+```
+
+> **Don't use `hermes plugins enable caspase`** — that command (and the
+> interactive `hermes plugins` UI) only manage *git-installed* plugins under
+> `~/.hermes/plugins/`. They don't see pip/entry-point plugins like Caspase
+> and will report "not installed or bundled." The runtime loader still honours
+> the `plugins.enabled` config key above for entry-point plugins, so that's
+> the supported enable path here.
 
 ### 3. Configure Caspase
 
@@ -142,7 +166,7 @@ Expected behaviour:
 ### 6. Inspect the kill
 
 ```powershell
-uv run caspase agents list
+uv run caspase fleet
 uv run caspase logs <agent_id_from_above>
 ```
 
@@ -179,7 +203,15 @@ environment and point it at a deployed control plane:
 
 ```bash
 pip install caspase-hermes
-hermes plugins enable caspase
+
+# Enable the plugin: add `caspase` to plugins.enabled in your Hermes config
+# (~/.hermes/config.yaml). `hermes plugins enable` only manages git-installed
+# plugins, not pip/entry-point plugins like this one.
+cat >> ~/.hermes/config.yaml <<'YAML'
+plugins:
+  enabled:
+    - caspase
+YAML
 
 export CASPASE_API_KEY=sk-...
 export CASPASE_BASE_URL=https://your-control-plane.example.com
@@ -209,7 +241,7 @@ uv run --package caspase-control-plane caspase-control-plane
 | `token_runaway` | Cumulative LLM cost exceeds the policy cost cap |
 | `wall_clock` | Session runs longer than the policy wall-clock cap |
 | `tool_scope_violation` | Agent calls a tool not in the policy allowlist |
-| `heartbeat_loss` | SDK stops posting heartbeats — operator can confirm via `caspase agents list` |
+| `heartbeat_loss` | SDK stops posting heartbeats — operator can confirm via `caspase fleet` |
 | `manual_kill` | Operator issues `caspase kill <agent_id>` (bypasses grants) |
 
 On any terminal symptom Caspase requests a cooperative shutdown via the framework adapter; the SDK posts a death certificate with the full symptom log and a feedback URL.
@@ -235,13 +267,13 @@ Customers can also pass a custom `Policy` object via `policy=...` on the watch c
 ## Operator CLI
 
 ```bash
-caspase agents list                          # registered agents + status
+caspase fleet                                # registered agents + status
 caspase logs <agent_id>                      # tail events
 caspase kill <agent_id> --reason "loop"      # manual kill with worst-case latency banner
-caspase grants create <agent_id> \
-    --symptom loop --duration 1h \
+caspase grant <agent_id> \
+    --symptoms loop --duration 1h \
     --reason "known flaky task"             # suppress one symptom temporarily
-caspase grants revoke <grant_id>             # idempotent revoke
+caspase revoke <grant_id>                    # idempotent revoke
 ```
 
 `caspase kill` prints the worst-case cooperative-kill latency up front so the operator has the right mental model before the wait starts. Exit code `6` means the kill was issued but the death certificate wasn't observed inside the CLI timeout — the kill event id is named in the failure message so it can be reconciled out of band.
@@ -263,8 +295,8 @@ caspase grants revoke <grant_id>             # idempotent revoke
 Sometimes a kill would be wrong. A known-flaky integration test legitimately loops. A long-running data export blows the wall-clock cap. Caspase lets the operator pre-authorize the exception:
 
 ```bash
-caspase grants create <agent_id> \
-    --symptom wall_clock \
+caspase grant <agent_id> \
+    --symptoms wall_clock \
     --duration 4h \
     --reason "nightly dataset refresh"
 ```
@@ -297,11 +329,11 @@ uv run --package caspase-control-plane \
     alembic -c packages/caspase-control-plane/alembic.ini upgrade head   # migrate
 
 # operator CLI
-caspase agents list
+caspase fleet
 caspase logs <agent_id>
 caspase kill <agent_id> --reason "..."
-caspase grants create <agent_id> --symptom loop --duration 1h --reason "..."
-caspase grants revoke <grant_id>
+caspase grant <agent_id> --symptoms loop --duration 1h --reason "..."
+caspase revoke <grant_id>
 
 # tests
 uv run pytest                                                       # full suite
