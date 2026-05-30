@@ -1,12 +1,84 @@
-# Caspase: Apoptosis Protocol for AI Agents
+# Caspase — an apoptosis protocol for AI agents
 
-Drop one plugin into your agent runtime and Caspase watches every tool call and LLM turn. The moment it sees a runaway loop, a budget breach, a wall-clock overrun, or an out-of-scope tool call, it terminates the agent cleanly and writes a death certificate you can audit.
+Caspase watches every tool call and LLM turn of a running agent. The moment it
+sees a runaway loop, a budget breach, a wall-clock overrun, or an out-of-scope
+tool call, it **issues a cooperative shutdown and files an auditable death
+certificate**. Every kill is explainable, and every claim below is backed by a
+one-command demo you can run offline.
+
+## See it in 60 seconds — no API key, no Postgres
 
 ```bash
-pip install caspase-hermes
+uv sync
+uv run python -m demo
 ```
 
-That's it. Start your Hermes Agent session and Caspase activates automatically. Every session is queryable via the operator CLI (`caspase fleet`, `caspase logs <id>`) and the control-plane HTTP API; every kill is explainable.
+This boots an in-process control plane, drives the **real** detection engine
+into a loop, and files a death certificate — fully offline and deterministic:
+
+```text
+  CASPASE  ·  offline apoptosis demo
+  policy: strict   scenario: loop
+  ────────────────────────────────────────────────────────────
+
+▸ booting in-process control plane (sqlite, no postgres) …
+  ✓ control plane up at http://localhost:8000
+▸ registering agent demo-rogue-coder …
+  ✓ agent e39b0772-…-6865eb2be8c0 registered
+
+  strict policy caps identical tool calls at 3 — the agent gets stuck
+  re-reading the same file and Caspase pulls the plug on the 3rd call.
+
+  the agent starts working, then misbehaves:
+
+  01  read_file(path='README.md')                  ok
+  02  read_file(path='README.md')                  ok
+  03  read_file(path='README.md')                  ☠ LOOP
+
+  ⚡ apoptosis: signature 'read_file|…' repeated 3x in last 3 actions (cap 3)
+  block directive → {'action': 'block', 'message': 'caspase apoptosis: … End the session.'}
+
+▸ posting death certificate …
+  ✓ kill_event #1 filed
+
+  ┌─ DEATH CERTIFICATE ───────────────────────────────────────
+  │ agent      e39b0772-…-6865eb2be8c0
+  │ trigger    auto / loop
+  │ reason     signature 'read_file|…' repeated 3x in last 3 actions (cap 3)
+  │ symptoms   1 terminal
+  │   • loop  signature 'read_file|…' repeated 3x …
+  │ shutdown   1 step(s)
+  │   • apoptosis_requested
+  └──────────────────────────────────────────────────────────
+```
+
+> **What this shows — and what it doesn't.** The detection, the block directive,
+> and the forensic certificate are all real. The demo drives the engine directly
+> (no separate agent process is spawned), and the kill path shown is the
+> *cooperative* one. See [What the kill actually does](#what-the-kill-actually-does)
+> for the honest mechanics.
+
+Try the other symptoms: `uv run python -m demo --scenario cost|scope|wall_clock`
+(or `--list`). Each is deterministic and offline.
+
+## What the kill actually does
+
+Caspase's termination is **cooperative by default**, in two layers:
+
+- **L1 — block directive.** On a terminal symptom the framework adapter returns
+  `{"action": "block", "message": "caspase apoptosis: …"}` on every subsequent
+  tool call. The agent is *asked* to stop; its loop winds down naturally.
+- **L2 — watchdog.** A per-agent daemon thread ([`apoptosis.py`](packages/caspase-sdk/src/caspase/apoptosis.py))
+  escalates after a grace window with `loop.call_soon_threadsafe(task.cancel)`,
+  cancelling the agent's asyncio **task** from outside its event loop.
+
+**Honest limitation:** neither layer can stop an agent wedged in CPU-bound or
+synchronous code — both rely on the event loop reaching an `await`, and they
+cancel a *task*, not an OS *process*. A true subprocess supervisor
+(SIGTERM → SIGKILL) is on the [roadmap](#roadmap) (Phase 2). Until then,
+"termination" means cooperative shutdown, and the death certificate records
+exactly what happened. Naming this tradeoff is deliberate: the certificate is
+only as trustworthy as the claims around it.
 
 ---
 
@@ -54,7 +126,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Try it — end-to-end Hermes demo
+## Advanced: supervising a real runtime (Hermes)
+
+> The one-command demo above already shows the engine end-to-end. This section
+> is for wiring Caspase into an actual agent runtime — today that's
+> [Hermes Agent](https://github.com/NousResearch/hermes-agent). It needs an LLM
+> provider and a little more setup; reach for it once the offline demo makes
+> sense. (A LangGraph adapter is on the [roadmap](#roadmap).)
 
 This walks you through a real Hermes session being killed by Caspase on the
 `loop` symptom. Two terminals, ~5 minutes of setup the first time, no
@@ -352,6 +430,22 @@ uv run ruff check .
 
 ---
 
+## Roadmap
+
+Caspase is honest about where it is. In priority order:
+
+1. **Hard-kill supervisor mode (Phase 2).** Run the watched agent in a child
+   process and escalate SIGTERM → SIGKILL on a terminal symptom, closing the
+   cooperative-kill gap described in [What the kill actually does](#what-the-kill-actually-does).
+   Cooperative shutdown stays the default; hard-kill is opt-in for untrusted code.
+2. **LangGraph adapter (Phase 3).** A first-class adapter for a widely-used
+   runtime, mirroring the thin `caspase-hermes` bridge. Hermes stays supported.
+3. **Adaptive thresholds (Phase 4).** The death-cert feedback URL already
+   collects "this kill was right / wrong" labels; aggregate them per policy to
+   suggest threshold adjustments — a supervisor that improves as it's used.
+
+---
+
 ## Privacy
 
 - **Agent payloads** — only metadata (tool name + argument hash, token counts, cost, model id) leaves the agent process. Tool arguments themselves are never sent; the loop detector compares hashes.
@@ -420,10 +514,16 @@ git clone https://github.com/theopidori/caspase.git
 cd caspase
 uv sync                                          # installs all workspace packages
 
-uv run pytest -q                                 # full suite
-uv run mypy packages                             # strict type-check
+uv run pytest -q                                 # full suite (control-plane tests need Postgres)
+uv run pytest demo/tests -q                      # offline demo smoke test (no Postgres)
+uv run mypy packages/caspase-sdk/src packages/caspase-control-plane/src packages/caspase-hermes/src
 uv run ruff check .                              # lint
 ```
+
+**Regenerating the demo GIF.** The hero demo is recorded with
+[VHS](https://github.com/charmbracelet/vhs): `vhs docs/demo.tape` renders
+`docs/demo.gif` from `python -m demo`. It's fully deterministic and offline, so
+the recording runs unattended — no LLM key, no hardcoded ids.
 
 **Git workflow.** Never push to `main`. Create a `feat/...` or `fix/...` branch, push it, open a PR via `gh pr create`. Conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`) are preferred.
 
