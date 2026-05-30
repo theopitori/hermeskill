@@ -1,0 +1,49 @@
+"""Smoke test for the flagship `python -m demo` showpiece.
+
+Runs each scenario end-to-end against the real in-process control plane and
+asserts a kill actually fired and a death certificate was filed. This is what
+keeps the README GIF honest — if the demo ever stops killing, CI goes red.
+
+`asyncio_mode = "auto"` (see root pyproject) means these are picked up without
+an explicit marker. Scenarios run sequentially because each boots a uvicorn on
+the fixed demo port.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from demo.__main__ import run_offline_demo
+from demo.rogue import SCENARIOS
+
+# Each scenario must terminate on this specific symptom.
+_EXPECTED_SYMPTOM = {
+    "loop": "loop",
+    "cost": "token_runaway",
+    "scope": "tool_scope_violation",
+    "wall_clock": "wall_clock",
+}
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+async def test_scenario_kills_and_files_certificate(scenario: str) -> None:
+    outcome = await run_offline_demo(scenario, quiet=True)
+
+    # The agent was actually killed by the real engine.
+    assert outcome.result.killed, f"{scenario} produced no terminal verdict"
+    terminal = outcome.result.terminal
+    assert terminal is not None
+    assert terminal.symptom.value == _EXPECTED_SYMPTOM[scenario]
+
+    # A death certificate was filed with the control plane.
+    assert outcome.kill_event_id is not None
+    assert outcome.kill_event_id != -1
+
+    # The kill is reflected in the watcher state the cert is built from.
+    assert outcome.result.state.terminate_requested is True
+    assert outcome.result.state.symptoms_log, "symptom was not recorded"
+
+
+async def test_all_scenarios_are_covered() -> None:
+    """Guard: every shipped scenario has an expected-symptom assertion."""
+    assert set(SCENARIOS) == set(_EXPECTED_SYMPTOM)
