@@ -57,7 +57,14 @@ async def submit_feedback(
     token_row = (await session.execute(stmt)).scalar_one_or_none()
 
     now = datetime.now(UTC)
-    if token_row is None or token_row.expires_at <= now:
+    # `expires_at` is a DateTime(timezone=True) column: tz-aware on Postgres,
+    # but SQLite (aiosqlite) drops the tzinfo on readback. The stored value is
+    # always UTC, so coerce a naive readback back to UTC before comparing —
+    # otherwise the comparison raises on SQLite (naive vs aware).
+    expires_at = token_row.expires_at if token_row is not None else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if token_row is None or expires_at is None or expires_at <= now:
         # Same response for "never existed" and "expired" — don't leak
         # whether the token was ever real to a stranger.
         raise HTTPException(

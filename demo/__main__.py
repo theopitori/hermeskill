@@ -53,6 +53,7 @@ from demo._style import (
 from demo._style import (
     yellow as _yellow,
 )
+from demo.calibrate import run_calibrate_demo
 from demo.coding_agent._bootstrap import (
     _DEV_DEVELOPER_KEY,
     start_control_plane,
@@ -80,11 +81,15 @@ _SCENARIO_BLURB = {
     "time budget and is terminated.",
     "hardkill": "L3 supervisor: a CPU-wedged agent that ignores cooperative "
     "shutdown is force-killed (SIGKILL) in its child process.",
+    "calibrate": "feedback loop: files several loop-kills, labels most "
+    "false-positive via the real feedback endpoint, then shows the advisory "
+    "'raise the loop cap' suggestion Caspase derives — suggest-only, never auto-applied.",
 }
 
-# Engine scenarios (run in-process via the watcher) plus the L3 hardkill
-# scenario (spawns + supervises a real child process).
-_ALL_SCENARIOS = (*SCENARIOS, "hardkill")
+# Engine scenarios (run in-process via the watcher), the L3 hardkill scenario
+# (spawns + supervises a real child process), and the Phase-4 calibrate
+# scenario (files labelled kills, then surfaces a tuning suggestion).
+_ALL_SCENARIOS = (*SCENARIOS, "hardkill", "calibrate")
 
 
 @dataclass(slots=True)
@@ -246,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.scenario == "hardkill":
             hk = asyncio.run(run_hardkill_demo())
             return 0 if hk.killed else 1
+        if args.scenario == "calibrate":
+            cal = asyncio.run(run_calibrate_demo())
+            return 0 if cal.loop_suggested_value is not None else 1
         outcome = asyncio.run(run_offline_demo(args.scenario))
     except KeyboardInterrupt:
         return 130

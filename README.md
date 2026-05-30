@@ -433,6 +433,7 @@ caspase logs <agent_id>
 caspase kill <agent_id> --reason "..."
 caspase grant <agent_id> --symptoms loop --duration 1h --reason "..."
 caspase revoke <grant_id>
+caspase calibrate <policy>                                          # tuning report
 
 # tests
 uv run pytest                                                       # full suite
@@ -440,6 +441,50 @@ uv run pytest packages/caspase-sdk/tests -q
 uv run mypy packages
 uv run ruff check .
 ```
+
+---
+
+## Calibration: tuning from feedback
+
+Every death certificate ships with a one-click feedback link. When an operator
+clicks it, they label the kill — `good_kill`, `false_positive`, `missed_kill`,
+or `other`. Those labels are the only signal here; nothing is inferred from the
+kill itself.
+
+`caspase calibrate <policy>` (and `GET /policies/{policy}/calibration`) turns
+those labels into an **advisory report**: per symptom, how many kills were
+labeled, the false-positive rate, and — only when the evidence warrants — a
+suggested looser limit for a human to apply.
+
+```text
+┌─ CALIBRATION · strict ────────────────────────────────────
+│ loop           n=5  fp=60%   [low]
+│   ↑ raise max_loop_repeats 3 → 5
+└──────────────────────────────────────────────────────────
+```
+
+The mechanism is deliberately small and honest, not "adaptive AI":
+
+- **Suggest-only.** It prints a policy edit a human applies. It never mutates a
+  policy and never auto-tunes anything. Policies stay SDK-defined constants.
+- **It only ever loosens.** A suggestion fires solely when operators flag a
+  symptom's kills as false positives above a threshold. It **cannot** recommend
+  tightening — executed-kill feedback structurally can't observe the kills that
+  *should* have fired but didn't, so suggesting a tighter limit from this data
+  would be guessing. That's a deliberate scope, not a TODO.
+- **Evidence first, with hedges shown.** Each row leads with the false-positive
+  rate and sample size, and carries a confidence tier (`low` / `medium` /
+  `high`) that scales with how many labels back it. Below a minimum sample size
+  it reports the rate but makes no suggestion. The `3 → 5` above is labeled
+  `[low]` precisely because it rests on only five kills.
+- **Numeric knobs only.** `loop`, `token_runaway`, and `wall_clock` map to
+  numeric limits and can be suggested; a symptom like `tool_scope_violation`
+  (an allowlist, not a number) is reported as stats only.
+
+See it run end-to-end — file kills, label them, read the report — with
+`python -m demo --scenario calibrate`. The heuristic itself is a pure function
+over labeled kills ([`caspase.calibration`](packages/caspase-sdk/src/caspase/calibration.py)),
+so it's unit-tested without a database.
 
 ---
 
@@ -452,14 +497,16 @@ Caspase is honest about where it is.
   the cooperative-kill gap. See [`ProcessSupervisor`](packages/caspase-sdk/src/caspase/supervisor.py)
   and `python -m demo --scenario hardkill`. Cooperative shutdown stays the
   default; hard-kill is opt-in for untrusted or wedge-prone agents.
+- ✅ **Feedback-driven calibration (Phase 4) — shipped.** The death-cert feedback
+  labels feed an advisory, suggest-only calibration report — see
+  [Calibration](#calibration-tuning-from-feedback) below and
+  `python -m demo --scenario calibrate`. It suggests *looser* limits where
+  operators flag false positives; it never auto-applies and never tightens.
 
 Next, in priority order:
 
 1. **LangGraph adapter (Phase 3).** A first-class adapter for a widely-used
    runtime, mirroring the thin `caspase-hermes` bridge. Hermes stays supported.
-2. **Adaptive thresholds (Phase 4).** The death-cert feedback URL already
-   collects "this kill was right / wrong" labels; aggregate them per policy to
-   suggest threshold adjustments — a supervisor that improves as it's used.
 
 ---
 

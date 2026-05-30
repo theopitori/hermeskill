@@ -26,6 +26,7 @@ from caspase.types import (
     AgentRegistrationIn,
     AgentRegistrationOut,
     AgentSummary,
+    CalibrationReport,
     EventBatchIn,
     EventIn,
     EventPage,
@@ -204,6 +205,16 @@ class CaspaseClient:
     async def list_kill_events(self, agent_id: UUID | str) -> list[KillEventOut]:
         data = await self._request("GET", f"/agents/{agent_id}/kill_events")
         return [KillEventOut.model_validate(k) for k in data]
+
+    # --- calibration (Phase 4) -------------------------------------------
+
+    async def get_calibration(self, policy_name: str) -> CalibrationReport:
+        """Advisory calibration report for a policy from this customer's
+        feedback labels. Read-only — never mutates the policy. 404
+        (NotFoundError) if the policy name isn't one the SDK ships.
+        """
+        data = await self._request("GET", f"/policies/{policy_name}/calibration")
+        return CalibrationReport.model_validate(data)
 
     # --- manual kill (M4) -------------------------------------------------
 

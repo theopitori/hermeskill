@@ -10,6 +10,7 @@ Extended in M1 with the register/heartbeat/events request-response shapes.
 from __future__ import annotations
 
 from .agents import AgentRegistrationIn, AgentRegistrationOut, AgentSummary
+from .calibration import CalibrationReport, SymptomCalibration
 from .enums import (
     AgentStatus,
     EventType,
@@ -38,6 +39,7 @@ __all__ = [
     "AgentStatus",
     "AgentSummary",
     "ApoptosisProofingDefaults",
+    "CalibrationReport",
     "DeathCertificate",
     "EventBatchIn",
     "EventIn",
@@ -60,6 +62,7 @@ __all__ = [
     "Policy",
     "PolicyThresholds",
     "ShutdownLogEntry",
+    "SymptomCalibration",
     "SymptomType",
     "TerminateAgentIn",
     "TriggerType",
