@@ -47,3 +47,19 @@ async def test_scenario_kills_and_files_certificate(scenario: str) -> None:
 async def test_all_scenarios_are_covered() -> None:
     """Guard: every shipped scenario has an expected-symptom assertion."""
     assert set(SCENARIOS) == set(_EXPECTED_SYMPTOM)
+
+
+async def test_hardkill_supervisor_kills_wedged_child_and_files_cert() -> None:
+    """The L3 hardkill scenario spawns + force-kills a real wedged process.
+
+    On POSIX (incl. CI) this exercises the SIGKILL escalation path; on Windows
+    terminate() is already a hard kill. Either way the child must die and a
+    death certificate must be filed.
+    """
+    from demo.hardkill import run_hardkill_demo
+
+    outcome = await run_hardkill_demo(quiet=True)
+    assert outcome.killed is True
+    assert outcome.trigger == "heartbeat_loss"
+    assert outcome.kill_event_id is not None
+    assert outcome.kill_event_id != -1
