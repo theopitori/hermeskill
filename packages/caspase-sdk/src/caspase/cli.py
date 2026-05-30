@@ -219,6 +219,82 @@ def _print_event(ev: EventOut) -> None:
             console.print(f"[dim]{ts}[/dim] {ev.type.value} {ev.payload}")
 
 
+# --- calibrate (Phase 4) -------------------------------------------------
+
+
+@app.command()
+def calibrate(
+    policy: str = typer.Argument(
+        ..., help="Policy name (strict, coding-default, permissive)."
+    ),
+) -> None:
+    """Suggest threshold tweaks for a policy from operator feedback labels.
+
+    Reads the one-click feedback verdicts collected on past death
+    certificates and reports, per symptom, how often kills were labeled
+    false-positive — and, where a numeric threshold maps cleanly, a looser
+    value to *consider*. Advisory only: it never edits the policy, and it
+    only ever loosens (executed-kill feedback can't see kills that should
+    have fired but didn't, so it never recommends tightening).
+    """
+    _run(_calibrate(policy))
+
+
+async def _calibrate(policy: str) -> None:
+    async with CaspaseClient.from_config() as client:
+        try:
+            report = await client.get_calibration(policy)
+        except NotFoundError:
+            err_console.print(f"[red]unknown policy:[/red] {policy}")
+            raise typer.Exit(4) from None
+
+    console.print(
+        f"[bold]calibration[/bold] [dim]·[/dim] policy [magenta]{report.policy_name}"
+        f"[/magenta] [dim]·[/dim] {report.total_labeled_kills} labeled kill(s)"
+    )
+
+    if not report.symptoms:
+        console.print(
+            "[dim]no labeled kills yet — collect feedback via the link in "
+            "death certificates, then re-run.[/dim]"
+        )
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Symptom", style="cyan", no_wrap=True)
+    table.add_column("n", justify="right")
+    table.add_column("FP rate", justify="right")
+    table.add_column("good/fp/miss/other", justify="center")
+    table.add_column("Suggestion")
+    table.add_column("Confidence", style="yellow")
+
+    for s in report.symptoms:
+        if s.suggested_value is not None and s.threshold_field is not None:
+            suggestion = (
+                f"[green]{s.threshold_field} "
+                f"{s.current_value:g}→{s.suggested_value:g}[/green]"
+            )
+        else:
+            suggestion = "[dim]—[/dim]"
+        fp_rate = f"{s.false_positive_rate * 100:.0f}%"
+        breakdown = (
+            f"{s.good_kills}/{s.false_positives}/{s.missed_kills}/{s.other}"
+        )
+        table.add_row(
+            s.symptom.value,
+            str(s.total_labeled),
+            fp_rate,
+            breakdown,
+            suggestion,
+            s.confidence,
+        )
+
+    console.print(table)
+    for s in report.symptoms:
+        console.print(f"  [dim]• {s.symptom.value}:[/dim] {s.rationale}")
+    console.print(f"\n[dim]{report.notes}[/dim]")
+
+
 # --- placeholders (later milestones) -------------------------------------
 
 

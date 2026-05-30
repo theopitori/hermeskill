@@ -63,3 +63,23 @@ async def test_hardkill_supervisor_kills_wedged_child_and_files_cert() -> None:
     assert outcome.trigger == "heartbeat_loss"
     assert outcome.kill_event_id is not None
     assert outcome.kill_event_id != -1
+
+
+async def test_calibrate_scenario_labels_kills_and_surfaces_suggestion() -> None:
+    """The Phase-4 calibrate scenario files labelled kills and tunes a hint.
+
+    Exercises the full feedback loop on SQLite end-to-end: register N agents,
+    drive a real loop-kill each, submit operator labels through the *real*
+    public ``POST /feedback/{token}`` endpoint, then fetch the calibration
+    report. Asserts every verdict landed and the advisory suggestion appears.
+    This is the guard for the SQLite-portable feedback path (naive-vs-aware
+    ``expires_at`` comparison) that no Postgres test exercises.
+    """
+    from demo.calibrate import run_calibrate_demo
+
+    outcome = await run_calibrate_demo(quiet=True)
+    # Every operator verdict was recorded through the real feedback endpoint.
+    assert outcome.labeled == 5, "not all feedback labels were accepted"
+    # 60% of loop-kills were labelled false-positive → advisory loosening of
+    # the strict loop cap (3 → ceil(3 * 1.5) = 5).
+    assert outcome.loop_suggested_value == 5.0
