@@ -63,7 +63,8 @@ Try the other symptoms: `uv run python -m demo --scenario cost|scope|wall_clock`
 
 ## What the kill actually does
 
-Caspase's termination is **cooperative by default**, in two layers:
+Caspase's termination is **cooperative by default**, escalating through three
+layers:
 
 - **L1 — block directive.** On a terminal symptom the framework adapter returns
   `{"action": "block", "message": "caspase apoptosis: …"}` on every subsequent
@@ -71,14 +72,26 @@ Caspase's termination is **cooperative by default**, in two layers:
 - **L2 — watchdog.** A per-agent daemon thread ([`apoptosis.py`](packages/caspase-sdk/src/caspase/apoptosis.py))
   escalates after a grace window with `loop.call_soon_threadsafe(task.cancel)`,
   cancelling the agent's asyncio **task** from outside its event loop.
+- **L3 — process supervisor (opt-in).** [`ProcessSupervisor`](packages/caspase-sdk/src/caspase/supervisor.py)
+  runs the agent in a **child process** and escalates **SIGTERM → grace →
+  SIGKILL** from the parent. Because it lives in a separate process, it kills an
+  agent the agent cannot veto.
 
-**Honest limitation:** neither layer can stop an agent wedged in CPU-bound or
-synchronous code — both rely on the event loop reaching an `await`, and they
-cancel a *task*, not an OS *process*. A true subprocess supervisor
-(SIGTERM → SIGKILL) is on the [roadmap](#roadmap) (Phase 2). Until then,
-"termination" means cooperative shutdown, and the death certificate records
-exactly what happened. Naming this tradeoff is deliberate: the certificate is
-only as trustworthy as the claims around it.
+**The boundary, stated honestly.** L1/L2 cannot stop an agent wedged in
+CPU-bound or synchronous code — both rely on the event loop reaching an `await`,
+and they cancel a *task*, not an OS *process*. **L3 is the answer to exactly
+that case**, and it's the layer that makes "apoptosis" literally true. It's
+opt-in (the cooperative path stays the default for well-behaved agents), and on
+Windows `terminate()` is already a hard kill (there is no catchable SIGTERM), so
+the grace window applies on POSIX only. See it kill a real wedged process:
+
+```bash
+uv run python -m demo --scenario hardkill
+```
+
+Whichever layer fires, the death certificate records the exact shutdown sequence
+(`supervisor_sigterm`, `supervisor_sigkill`, …) — the certificate is only as
+trustworthy as the claims around it.
 
 ---
 
@@ -432,15 +445,19 @@ uv run ruff check .
 
 ## Roadmap
 
-Caspase is honest about where it is. In priority order:
+Caspase is honest about where it is.
 
-1. **Hard-kill supervisor mode (Phase 2).** Run the watched agent in a child
-   process and escalate SIGTERM → SIGKILL on a terminal symptom, closing the
-   cooperative-kill gap described in [What the kill actually does](#what-the-kill-actually-does).
-   Cooperative shutdown stays the default; hard-kill is opt-in for untrusted code.
-2. **LangGraph adapter (Phase 3).** A first-class adapter for a widely-used
+- ✅ **Hard-kill supervisor mode (Phase 2) — shipped.** The watched agent runs
+  in a child process; the parent escalates SIGTERM → grace → SIGKILL, closing
+  the cooperative-kill gap. See [`ProcessSupervisor`](packages/caspase-sdk/src/caspase/supervisor.py)
+  and `python -m demo --scenario hardkill`. Cooperative shutdown stays the
+  default; hard-kill is opt-in for untrusted or wedge-prone agents.
+
+Next, in priority order:
+
+1. **LangGraph adapter (Phase 3).** A first-class adapter for a widely-used
    runtime, mirroring the thin `caspase-hermes` bridge. Hermes stays supported.
-3. **Adaptive thresholds (Phase 4).** The death-cert feedback URL already
+2. **Adaptive thresholds (Phase 4).** The death-cert feedback URL already
    collects "this kill was right / wrong" labels; aggregate them per policy to
    suggest threshold adjustments — a supervisor that improves as it's used.
 

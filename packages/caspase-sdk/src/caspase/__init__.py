@@ -22,10 +22,14 @@ raises CaspaseTerminated if a kill directive is pending.
 
 from caspase._version import __version__
 from caspase.exceptions import CaspaseError, CaspaseTerminated
+from caspase.supervisor import Heartbeat, ProcessSupervisor, SupervisorResult
 
 __all__ = [
     "CaspaseError",
     "CaspaseTerminated",
+    "Heartbeat",
+    "ProcessSupervisor",
+    "SupervisorResult",
     "__version__",
     "checkpoint",
 ]

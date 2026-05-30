@@ -31,10 +31,33 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from demo._style import RULE as _RULE
+from demo._style import (
+    bold as _bold,
+)
+from demo._style import (
+    cyan as _cyan,
+)
+from demo._style import (
+    dim as _dim,
+)
+from demo._style import (
+    green as _green,
+)
+from demo._style import (
+    prepare_console as _prepare_console,
+)
+from demo._style import (
+    red as _red,
+)
+from demo._style import (
+    yellow as _yellow,
+)
 from demo.coding_agent._bootstrap import (
     _DEV_DEVELOPER_KEY,
     start_control_plane,
 )
+from demo.hardkill import run_hardkill_demo
 from demo.rogue import (
     DEFAULT_SCENARIO,
     SCENARIOS,
@@ -55,43 +78,13 @@ _SCENARIO_BLURB = {
     "run_bash and is blocked before the tool ever runs.",
     "wall_clock": "strict policy caps wall-clock at 300s — the agent overruns its "
     "time budget and is terminated.",
+    "hardkill": "L3 supervisor: a CPU-wedged agent that ignores cooperative "
+    "shutdown is force-killed (SIGKILL) in its child process.",
 }
 
-
-# --- tiny ANSI helpers (no dependency on rich/colorama) -------------------
-
-_USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
-
-
-def _c(code: str, text: str) -> str:
-    return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
-
-
-def _dim(t: str) -> str:
-    return _c("2", t)
-
-
-def _bold(t: str) -> str:
-    return _c("1", t)
-
-
-def _red(t: str) -> str:
-    return _c("31", t)
-
-
-def _green(t: str) -> str:
-    return _c("32", t)
-
-
-def _yellow(t: str) -> str:
-    return _c("33", t)
-
-
-def _cyan(t: str) -> str:
-    return _c("36", t)
-
-
-_RULE = "─" * 60
+# Engine scenarios (run in-process via the watcher) plus the L3 hardkill
+# scenario (spawns + supervises a real child process).
+_ALL_SCENARIOS = (*SCENARIOS, "hardkill")
 
 
 @dataclass(slots=True)
@@ -100,28 +93,6 @@ class DemoOutcome:
 
     result: ScenarioResult
     kill_event_id: int | None
-
-
-def _prepare_console() -> None:
-    """Make stdout UTF-8 (for box-drawing glyphs) and enable ANSI on Windows.
-
-    Windows consoles default to a legacy code page (cp1252) that can't encode
-    the demo's Unicode framing, and legacy consoles need ANSI processing turned
-    on explicitly. Both are best-effort — the demo still runs without them.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            with contextlib.suppress(Exception):
-                reconfigure(encoding="utf-8", errors="replace")
-    if sys.platform == "win32":
-        with contextlib.suppress(Exception):
-            import ctypes
-
-            # getattr keeps this type-clean off-Windows (ctypes.windll is
-            # Windows-only) without a platform-specific type: ignore.
-            kernel32 = getattr(ctypes, "windll").kernel32  # noqa: B009
-            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
 
 
 async def run_offline_demo(
@@ -234,7 +205,8 @@ async def run_offline_demo(
         say()
         say(_dim("  note: the detection, block directive, and certificate above are"))
         say(_dim("  real. no agent process was force-killed — this is the cooperative"))
-        say(_dim("  block path. OS-level hard-kill (SIGKILL) is the Phase-2 roadmap."))
+        say(_dim("  block path. for an OS-level SIGKILL of a wedged agent that ignores"))
+        say(_dim("  cooperative shutdown, run:  ") + "uv run python -m demo --scenario hardkill")
         say()
         return DemoOutcome(result=result, kill_event_id=kill_event_id)
     finally:
@@ -253,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--scenario",
-        choices=SCENARIOS,
+        choices=_ALL_SCENARIOS,
         default=DEFAULT_SCENARIO,
         help=f"which symptom to trigger (default: {DEFAULT_SCENARIO})",
     )
@@ -266,11 +238,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list:
         print("scenarios:")
-        for name in SCENARIOS:
+        for name in _ALL_SCENARIOS:
             print(f"  {name:<12} {_SCENARIO_BLURB.get(name, '')}")
         return 0
 
     try:
+        if args.scenario == "hardkill":
+            hk = asyncio.run(run_hardkill_demo())
+            return 0 if hk.killed else 1
         outcome = asyncio.run(run_offline_demo(args.scenario))
     except KeyboardInterrupt:
         return 130
