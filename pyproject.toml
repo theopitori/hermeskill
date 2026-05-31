@@ -11,7 +11,6 @@ members = ["packages/*"]
 caspase = { workspace = true }
 caspase-control-plane = { workspace = true }
 caspase-hermes = { workspace = true }
-caspase-langgraph = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -30,9 +29,6 @@ dev = [
     "caspase",
     "caspase-control-plane",
     "caspase-hermes",
-    # The LangGraph adapter package + its [graph] extra (langgraph) so the
-    # adapter's StateGraph integration tests run under a bare `uv sync`.
-    "caspase-langgraph[graph]",
     # Real Hermes Agent in the workspace venv so 'uv run hermes ...' discovers
     # our caspase-hermes plugin via the hermes_agent.plugins entry-point group.
     # See README "Try it" section for the integration walkthrough.
@@ -54,7 +50,7 @@ strict = true
 exclude = ["migrations/"]
 
 [[tool.mypy.overrides]]
-module = ["hermes_agent.*", "langgraph.*"]
+module = ["hermes_agent.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -62,4 +58,4 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 addopts = "--import-mode=importlib"
-testpaths = ["packages/caspase-sdk/tests", "packages/caspase-control-plane/tests", "packages/caspase-hermes/tests", "packages/caspase-langgraph/tests"]
+testpaths = ["packages/caspase-sdk/tests", "packages/caspase-control-plane/tests", "packages/caspase-hermes/tests"]
