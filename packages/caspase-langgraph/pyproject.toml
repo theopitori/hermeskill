@@ -1,0 +1,31 @@
+[project]
+name = "caspase-langgraph"
+version = "0.1.0a0"
+description = "Caspase apoptosis supervision for LangGraph / LangChain agents — wrap your graph, it never runs away again"
+readme = "src/caspase_langgraph/README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "caspase>=0.1.0a0",
+    "langchain-core>=0.3",
+]
+
+[project.optional-dependencies]
+# `langgraph` itself is only needed to *build* a StateGraph; the adapter
+# attaches to any LangChain Runnable via the public callback API, so the
+# hard dependency is langchain-core. Pull in langgraph for the StateGraph
+# integration tests and for users wiring a graph end-to-end.
+graph = [
+    "langgraph>=0.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/theopitori/caspase"
+Documentation = "https://github.com/theopitori/caspase#readme"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/caspase_langgraph"]

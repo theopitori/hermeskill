@@ -101,7 +101,8 @@ trustworthy as the claims around it.
 caspase/
 ├── control plane     FastAPI service that stores agents, policies, kill events, grants
 ├── SDK               watcher state, symptom checks, death certificates, kill client
-├── Hermes plugin     drop-in supervision for Hermes Agent (the supported runtime today)
+├── Hermes plugin     drop-in supervision for Hermes Agent
+├── LangGraph adapter wrap any LangGraph graph / LangChain Runnable with watch()
 └── operator CLI      list agents, tail logs, issue kills, grant exceptions
 ```
 
@@ -145,7 +146,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 > is for wiring Caspase into an actual agent runtime — today that's
 > [Hermes Agent](https://github.com/NousResearch/hermes-agent). It needs an LLM
 > provider and a little more setup; reach for it once the offline demo makes
-> sense. (A LangGraph adapter is on the [roadmap](#roadmap).)
+> sense. Prefer LangGraph? See [Supervising a LangGraph agent](#supervising-a-langgraph-agent) below.
 
 This walks you through a real Hermes session being killed by Caspase on the
 `loop` symptom. Two terminals, ~5 minutes of setup the first time, no
@@ -276,6 +277,40 @@ control plane's REST API.
 
 Ctrl+C in the terminal running `_run_control_plane`. The on-disk SQLite
 file is recreated next time you start it, so demo data is ephemeral.
+
+---
+
+## Supervising a LangGraph agent
+
+If your agent is a [LangGraph](https://github.com/langchain-ai/langgraph) graph
+(or any LangChain `Runnable`), the [`caspase-langgraph`](packages/caspase-langgraph)
+adapter wraps it in five lines — no runtime config, no plugin discovery:
+
+```bash
+pip install "caspase-langgraph[graph]"
+```
+
+```python
+from caspase_langgraph import watch
+
+async def main():
+    # my_graph is a compiled StateGraph (or any Runnable)
+    graph = await watch(my_graph, name="bot-v1", policy="coding-default")
+    await graph.ainvoke({"task": "fix the failing test"})
+```
+
+`watch()` registers the agent, attaches the Caspase callback to your graph, and
+runs the same loop / cost / wall-clock / tool-scope checks at every **node and
+tool boundary**. The kill mechanism differs from Hermes by necessity: LangChain
+has no "block this call" return channel, so when a terminal symptom fires the
+adapter **raises `CaspaseTerminated`** at the next boundary (the cooperative
+L1 kill), posts the death certificate, and re-raises so your own `try/finally`
+cleanup still runs.
+
+The core `caspase` SDK has no LangChain dependency — each runtime gets a thin,
+opt-in adapter package, so the engine stays runtime-agnostic. See the
+[package README](packages/caspase-langgraph/src/caspase_langgraph/README.md)
+for details.
 
 ---
 
@@ -502,11 +537,14 @@ Caspase is honest about where it is.
   [Calibration](#calibration-tuning-from-feedback) below and
   `python -m demo --scenario calibrate`. It suggests *looser* limits where
   operators flag false positives; it never auto-applies and never tightens.
+- ✅ **LangGraph adapter (Phase 3) — shipped.** A thin adapter package
+  ([`caspase-langgraph`](packages/caspase-langgraph)) supervises any LangGraph
+  graph or LangChain `Runnable` via `watch()` — see
+  [Supervising a LangGraph agent](#supervising-a-langgraph-agent). Hermes stays
+  supported; the core SDK keeps no LangChain dependency.
 
-Next, in priority order:
-
-1. **LangGraph adapter (Phase 3).** A first-class adapter for a widely-used
-   runtime, mirroring the thin `caspase-hermes` bridge. Hermes stays supported.
+All four roadmap phases are now shipped. Next directions are demand-driven
+(more runtime adapters, richer policies) rather than scheduled.
 
 ---
 
@@ -544,7 +582,7 @@ The control plane probes the pool with `SELECT 1` on every health check. 503 mea
 `task.cancel()` only fires at the next `await`. Agents wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) won't notice the flag until they return to the event loop. Mitigation: run the agent in its own subprocess so a parent process can `SIGTERM`/`SIGKILL` it on timeout.
 
 **`pytest` fails in `packages/caspase-control-plane/tests/`**
-The control-plane tests connect to a real Postgres via `CASPASE_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/caspase-sdk/tests packages/caspase-hermes/tests`.
+The control-plane tests connect to a real Postgres via `CASPASE_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/caspase-sdk/tests packages/caspase-hermes/tests packages/caspase-langgraph/tests`.
 
 ---
 
@@ -555,7 +593,8 @@ caspase/
 ├── packages/
 │   ├── caspase-sdk/                  # SDK: watcher, checks, client, CLI
 │   ├── caspase-control-plane/        # FastAPI service + Alembic migrations
-│   └── caspase-hermes/               # Hermes Agent plugin
+│   ├── caspase-hermes/               # Hermes Agent plugin
+│   └── caspase-langgraph/            # LangGraph / LangChain adapter (watch())
 ├── deploy/
 │   ├── setup.sh                      # Ubuntu VM bootstrap
 │   ├── dev-db-bootstrap.ps1          # Windows Postgres dev setup
