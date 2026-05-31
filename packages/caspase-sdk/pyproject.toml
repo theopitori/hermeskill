@@ -1,6 +1,6 @@
 [project]
 name = "caspase"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "Caspase SDK — apoptosis protocol core: watcher state, symptom checks, death certificates, and control-plane client"
 readme = "README.md"
 requires-python = ">=3.11"

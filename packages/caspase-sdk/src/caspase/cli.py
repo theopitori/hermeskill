@@ -100,6 +100,11 @@ def init(
     agent_name: str | None = typer.Option(
         None, "--agent-name", help="Default display name for this agent."
     ),
+    local_cert: bool = typer.Option(
+        True,
+        "--local-cert/--no-local-cert",
+        help="Print + save the death cert locally on a kill (default: on).",
+    ),
     force: bool = typer.Option(
         False, "--force", help="Overwrite an existing config file."
     ),
@@ -111,7 +116,11 @@ def init(
     work from any directory, not just inside the repo.
     """
     config = SDKConfig(
-        base_url=base_url, api_key=api_key, policy=policy, agent_name=agent_name
+        base_url=base_url,
+        api_key=api_key,
+        policy=policy,
+        agent_name=agent_name,
+        local_cert=local_cert,
     )
     try:
         path = save_config(config, force=force)
@@ -125,6 +134,64 @@ def init(
     console.print(
         "[dim]env vars (CASPASE_API_KEY, …) still override this file when set.[/dim]"
     )
+
+
+# --- enable-hermes -------------------------------------------------------
+
+
+@app.command("enable-hermes")
+def enable_hermes(
+    disable: bool = typer.Option(
+        False, "--disable", help="Remove caspase from plugins.enabled instead."
+    ),
+) -> None:
+    """Enable the Caspase plugin in your Hermes config (one-shot).
+
+    Adds (or, with --disable, removes) ``caspase`` to ``plugins.enabled`` in
+    your Hermes config. This is the supported enable path for pip/entry-point
+    plugins — ``hermes plugins enable`` only manages git-installed plugins and
+    won't see Caspase.
+    """
+    try:
+        from hermes_cli.config import (  # type: ignore[import-untyped]
+            get_config_path,
+            load_config,
+            save_config,
+        )
+    except ImportError:
+        err_console.print(
+            "[red]Hermes Agent isn't importable from this environment.[/red]\n"
+            "[dim]Install the plugin into Hermes' venv, e.g.:\n"
+            "  uv tool install hermes-agent --with caspase-hermes\n"
+            "then run `caspase enable-hermes` from there (or edit "
+            "plugins.enabled in your Hermes config by hand).[/dim]"
+        )
+        raise typer.Exit(2) from None
+
+    cfg = load_config()
+    plugins = cfg.setdefault("plugins", {})
+    enabled = plugins.setdefault("enabled", [])
+    if not isinstance(enabled, list):
+        err_console.print("[red]plugins.enabled is not a list in your Hermes config.[/red]")
+        raise typer.Exit(1)
+
+    path = get_config_path()
+    if disable:
+        if "caspase" not in enabled:
+            console.print("[dim]caspase was not enabled — nothing to do.[/dim]")
+            return
+        plugins["enabled"] = [p for p in enabled if p != "caspase"]
+        save_config(cfg)
+        console.print(f"[green]✓[/green] removed caspase from plugins.enabled ({path})")
+        return
+
+    if "caspase" in enabled:
+        console.print(f"[dim]caspase already enabled ({path}).[/dim]")
+        return
+    enabled.append("caspase")
+    save_config(cfg)
+    console.print(f"[green]✓[/green] enabled caspase in {path}")
+    console.print("[dim]Run Hermes and Caspase supervises every session.[/dim]")
 
 
 # --- shared error handling ----------------------------------------------

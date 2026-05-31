@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0a1 (2026-05-31)
+
+Zero-config, no-control-plane supervision — the death certificate now lands on every kill, even with no API key and no backend running.
+
+- **Keyless local-only path** — the Hermes plugin no longer requires `CASPASE_API_KEY`. When no key is configured it runs fully in-process (`forced_offline`): symptom checks + L2 watchdog supervise the agent and the kill fires without any network call. `CASPASE_API_KEY` is now **optional** and only enables control-plane archival, fleet visibility, manual kill, and grants. (`caspase.CaspaseClient.from_config(..., allow_keyless=True)`; the operator CLI stays strict and still errors cleanly without a key.)
+- **Local death certificate** — new `caspase.certificate` module renders the death certificate to a plain-text box and saves it to `~/.caspase/kills/<agent_id>-<timestamp>.txt` (+ `.json`) on every kill. On by default; toggle with `CASPASE_LOCAL_CERT=0` or `local_cert = false` in `config.toml`. The autopsy is now delivered in the zero-config path, not just when a control plane is reachable.
+- **`caspase enable-hermes`** — one-shot command that flips `caspase` in your Hermes `plugins.enabled` (with `--disable` to undo). Replaces the documented hand-edit of the Hermes config; `hermes plugins enable` does not manage entry-point plugins. Idempotent; exits cleanly when Hermes isn't installed.
+- **No offline traceback spam** — the background worker / kill poller no longer boot when running offline, so a keyless session no longer logs a full traceback every few seconds against an unreachable control plane.
+- **`caspase init --local-cert/--no-local-cert`** — surfaces the local-cert toggle when writing `~/.caspase/config.toml`.
+- **Docs** — README now leads with a 60-second zero-config quickstart (`install → caspase enable-hermes → hermes`); control plane is reframed as an opt-in "level up" for persistent history, fleet visibility, manual kill, and grants.
+
 ## 0.1.0a0 (2026-05-27)
 
 Initial alpha release.

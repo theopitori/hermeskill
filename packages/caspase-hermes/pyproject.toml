@@ -1,12 +1,12 @@
 [project]
 name = "caspase-hermes"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "Caspase apoptosis plugin for Hermes Agent — install once, your agent never runs away again"
 readme = "src/caspase_hermes/README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "caspase>=0.1.0a0",
+    "caspase>=0.1.0a1",
 ]
 
 [project.urls]

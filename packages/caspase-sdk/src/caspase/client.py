@@ -109,9 +109,22 @@ class CaspaseClient:
         config: SDKConfig | None = None,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        allow_keyless: bool = False,
     ) -> CaspaseClient:
+        """Build a client from config.
+
+        Strict by default: a missing API key raises ``AuthError`` so CLI
+        commands fail fast with a clear message. Framework adapters that
+        support local-only supervision (e.g. the Hermes plugin) pass
+        ``allow_keyless=True`` — the returned client carries an empty key and
+        must never be driven on the network in that mode (the adapter runs its
+        in-process checks and skips all control-plane calls). See
+        ``CaspasePlugin`` forced-offline path.
+        """
         cfg = config or SDKConfig.load()
         if not cfg.api_key:
+            if allow_keyless:
+                return cls(base_url=cfg.base_url, api_key="", transport=transport)
             raise AuthError(
                 "CASPASE_API_KEY not set. Put it in your environment or ~/.caspase/config.toml."
             )

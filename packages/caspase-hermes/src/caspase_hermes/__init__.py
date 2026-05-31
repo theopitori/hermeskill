@@ -28,10 +28,16 @@ sources for that case).
 Configuration (env vars or ``~/.hermes/.env``)
 ----------------------------------------------
 
-    CASPASE_API_KEY      — your operator API key (required)
+    CASPASE_API_KEY      — control-plane API key (OPTIONAL). Without it, Caspase
+                           runs local-only: in-process symptom checks still kill
+                           runaways and the death cert prints/saves locally; only
+                           control-plane archival, fleet visibility, manual kill,
+                           and grants need a key + reachable control plane.
     CASPASE_BASE_URL     — control plane URL (default: http://localhost:8000)
     CASPASE_AGENT_NAME   — display name for this session (default: "hermes")
     CASPASE_POLICY       — policy name (default: "coding-default")
+    CASPASE_LOCAL_CERT   — print/save the death cert locally on a kill
+                           (default: on; set 0 to disable)
 
 How it works
 ------------
@@ -72,7 +78,7 @@ from caspase_hermes.plugin import CaspasePlugin
 
 logger = logging.getLogger("caspase_hermes")
 
-__version__ = "0.1.0a0"
+__version__ = "0.1.0a1"
 
 _current_plugin: CaspasePlugin | None = None
 
@@ -92,9 +98,19 @@ def register(ctx: Any) -> None:
     config = SDKConfig.load()
     name = config.agent_name or "hermes"
     policy = config.policy or "coding-default"
-    client = CaspaseClient.from_config(config)
+    # No API key → run in local-only mode: in-process symptom checks still
+    # kill runaways and the death cert prints/saves locally; only control-plane
+    # archival, fleet visibility, manual kill, and grants are unavailable.
+    keyless = not config.api_key
+    client = CaspaseClient.from_config(config, allow_keyless=True)
 
-    plugin = CaspasePlugin(name=name, policy=policy, client=client)
+    plugin = CaspasePlugin(
+        name=name,
+        policy=policy,
+        client=client,
+        forced_offline=keyless,
+        local_cert=config.local_cert,
+    )
 
     # Run async setup on the plugin's own session loop thread. Hermes calls
     # register() synchronously; plugin.start() blocks only the calling thread
@@ -119,9 +135,16 @@ async def async_register(ctx: Any) -> None:
     config = SDKConfig.load()
     name = config.agent_name or "hermes"
     policy = config.policy or "coding-default"
-    client = CaspaseClient.from_config(config)
+    keyless = not config.api_key
+    client = CaspaseClient.from_config(config, allow_keyless=True)
 
-    plugin = CaspasePlugin(name=name, policy=policy, client=client)
+    plugin = CaspasePlugin(
+        name=name,
+        policy=policy,
+        client=client,
+        forced_offline=keyless,
+        local_cert=config.local_cert,
+    )
     await plugin.astart()
 
     _current_plugin = plugin

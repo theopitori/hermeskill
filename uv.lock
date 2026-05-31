@@ -156,7 +156,7 @@ wheels = [
 
 [[package]]
 name = "caspase"
-version = "0.1.0a0"
+version = "0.1.0a1"
 source = { editable = "packages/caspase-sdk" }
 dependencies = [
     { name = "httpx" },
@@ -175,7 +175,7 @@ requires-dist = [
 
 [[package]]
 name = "caspase-control-plane"
-version = "0.1.0a0"
+version = "0.1.0a1"
 source = { editable = "packages/caspase-control-plane" }
 dependencies = [
     { name = "alembic" },
@@ -206,7 +206,7 @@ requires-dist = [
 
 [[package]]
 name = "caspase-hermes"
-version = "0.1.0a0"
+version = "0.1.0a1"
 source = { editable = "packages/caspase-hermes" }
 dependencies = [
     { name = "caspase" },

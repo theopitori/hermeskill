@@ -7,48 +7,45 @@ and terminates the agent cleanly if it enters a runaway loop, exceeds its
 cost/token cap, runs past a wall-clock deadline, or calls a tool outside the
 policy allowlist.
 
-## Install
+## Install & enable (zero config)
 
 ```bash
-pip install caspase-hermes
+# Install the plugin into Hermes' environment:
+uv tool install hermes-agent --with caspase-hermes   # or: pip install caspase-hermes
+
+# Enable it (one shot — flips plugins.enabled in your Hermes config):
+caspase enable-hermes
 ```
 
-Hermes auto-discovers the plugin via the `hermes_agent.plugins` entry-point
-group — no directory copy required. Plugins are opt-in, so enable it by adding
-`caspase` to `plugins.enabled` in your Hermes config:
+That's it. **No API key, no control plane, no env vars.** Hermes auto-discovers
+the plugin via the `hermes_agent.plugins` entry-point group; `caspase
+enable-hermes` adds `caspase` to `plugins.enabled`. Run `hermes` and every
+session is supervised. When a runaway is killed, the death certificate prints to
+your terminal and saves to `~/.caspase/kills/`.
 
-```yaml
-# ~/.hermes/config.yaml  (Windows: %LOCALAPPDATA%\hermes\config.yaml)
-plugins:
-  enabled:
-    - caspase
-```
+> **Why `caspase enable-hermes` and not `hermes plugins enable caspase`?** The
+> latter (and the interactive `hermes plugins` UI) only manage **git-installed**
+> plugins under `~/.hermes/plugins/` — they don't see pip/entry-point plugins
+> like this one. `caspase enable-hermes` writes the supported `plugins.enabled`
+> config key for you. (To do it by hand: add `caspase` to `plugins.enabled` in
+> `~/.hermes/config.yaml`, Windows `%LOCALAPPDATA%\hermes\config.yaml`.)
 
-> **Note:** `hermes plugins enable caspase` and the interactive `hermes
-> plugins` UI only manage **git-installed** plugins under `~/.hermes/plugins/`.
-> They do not list pip-installed (entry-point) plugins like this one — enable
-> those via the `plugins.enabled` config key above. Once the name is there,
-> Hermes discovers and loads the plugin automatically at session start.
+## Configure (optional — for a control plane)
 
-## Configure
+Everything above works with nothing set. These add control-plane archival, a
+fleet view, manual kill, and grants:
 
 ```bash
-export CASPASE_API_KEY=sk-...
-export CASPASE_BASE_URL=https://your-control-plane.example.com  # optional, default localhost:8000
-export CASPASE_AGENT_NAME=my-coding-agent                       # optional display name
-export CASPASE_POLICY=coding-default                            # optional policy
+export CASPASE_API_KEY=sk-...                                   # ⇒ enables the control plane; unset = local-only
+export CASPASE_BASE_URL=https://your-control-plane.example.com  # default localhost:8000
+export CASPASE_AGENT_NAME=my-coding-agent                       # display name
+export CASPASE_POLICY=coding-default                            # policy
+export CASPASE_LOCAL_CERT=0                                     # disable the local cert print/save (default: on)
 ```
 
-Or add the same keys to `~/.hermes/.env`.
-
-## Run
-
-```bash
-hermes
-```
-
-Caspase activates automatically. Every session is queryable via the operator
-CLI (`caspase fleet`).
+Or add the same keys to `~/.hermes/.env`, or run `caspase init` once to persist
+them to `~/.caspase/config.toml`. With a key set, every session is also
+queryable via the operator CLI (`caspase fleet`).
 
 ## What it does
 

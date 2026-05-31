@@ -61,13 +61,19 @@ import asyncio
 import concurrent.futures
 import contextlib
 import logging
+import sys
 import threading
 import time
 from collections.abc import Coroutine
 from typing import Any
 from uuid import UUID, uuid4
 
-from caspase.apoptosis import Watchdog, build_kill_event_payload
+from caspase.apoptosis import (
+    Watchdog,
+    build_death_certificate,
+    build_kill_event_payload,
+)
+from caspase.certificate import render_certificate, save_certificate
 from caspase.client import CaspaseClient, TransportError
 from caspase.policies import resolve_policy
 from caspase.types import Policy
@@ -156,6 +162,8 @@ class CaspasePlugin:
         policy: str,
         metadata: dict[str, Any] | None = None,
         client: CaspaseClient,
+        forced_offline: bool = False,
+        local_cert: bool = True,
     ) -> None:
         self._client = client
         self._name = name
@@ -163,6 +171,12 @@ class CaspasePlugin:
         self._metadata = metadata or {}
         self._state: WatcherState | None = None
         self._loop_thread: _SessionLoop | None = None
+        # forced_offline: no API key was configured, so skip every control-plane
+        # call from the start (registration, worker, poller, death-cert POST) —
+        # the client carries an empty key and must never hit the network.
+        self._forced_offline = forced_offline
+        # local_cert: render + save the death certificate locally on a kill.
+        self._local_cert = local_cert
 
     def start(self) -> None:
         """Synchronous entry point used by Hermes' ``register()``.
@@ -212,7 +226,13 @@ class CaspasePlugin:
             grace_seconds=resolved_policy.thresholds.cooperative_grace_seconds,
         )
         register_watcher(state)
-        ensure_worker_started(self._client)
+        # The background worker + kill poller only talk to the control plane
+        # (heartbeats, event drain, manual-kill delivery). Offline they can
+        # never succeed and would log a connection-refused traceback every
+        # few seconds, so don't boot them. In-process symptom checks and the
+        # L2 watchdog run independently — the kill path is unaffected.
+        if not offline:
+            ensure_worker_started(self._client)
         self._state = state
 
         state.record_lifecycle(
@@ -245,6 +265,12 @@ class CaspasePlugin:
         errors (auth, server 5xx) are NOT swallowed here — those signal a
         misconfiguration the operator must fix, not a transient outage.
         """
+        # No API key configured → don't even attempt registration. Hitting a
+        # reachable control plane with an empty key would 401 (AuthError),
+        # which we deliberately DON'T swallow; forcing offline up front keeps
+        # the keyless path clean.
+        if self._forced_offline:
+            return uuid4(), True
         try:
             registration = await self._client.register_agent(
                 name=self._name,
@@ -322,10 +348,15 @@ class CaspasePlugin:
         # this is best-effort: a teardown hiccup must never escape a Hermes hook.
         loop_thread = self._loop_thread or _SessionLoop()
 
-        # 1. Death cert first, while the worker + client are still live.
+        # 1. Death certificate. Render + save it locally on every kill (the
+        #    autopsy is delivered even with no control plane); additionally
+        #    POST it for archival only when online.
         if self._state.terminate_requested:
-            with contextlib.suppress(Exception):
-                loop_thread.run(self._post_death_cert_best_effort(), timeout=35.0)
+            if self._local_cert:
+                self._emit_local_cert()
+            if not self._state.offline:
+                with contextlib.suppress(Exception):
+                    loop_thread.run(self._post_death_cert_best_effort(), timeout=35.0)
 
         # 2. Stop the worker. Its final drain flushes every queued event
         #    (tool calls, symptoms, session_end). Stop BEFORE unregistering so
@@ -362,6 +393,42 @@ class CaspasePlugin:
                 "other tools; end the session cleanly."
             ),
         }
+
+    # --- local death cert ----------------------------------------------------
+
+    def _emit_local_cert(self) -> None:
+        """Render the death certificate to stderr and save it under
+        ``~/.caspase/kills/``. Synchronous and best-effort — a rendering hiccup
+        must never escape a Hermes hook."""
+        if self._state is None:
+            return
+        # Windows consoles default to cp1252, which can't encode the cert's
+        # box-drawing glyphs. Reconfigure stderr to UTF-8 (best-effort, with
+        # replacement) so the write never raises — same guard the CLI uses.
+        reconfigure = getattr(sys.stderr, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
+        try:
+            cert = build_death_certificate(self._state)
+            cost_line = _format_cost_line(self._state)
+            sys.stderr.write("\n" + render_certificate(cert, cost_line=cost_line) + "\n")
+            sys.stderr.flush()
+        except Exception:
+            logger.exception(
+                "caspase: failed to render death certificate for agent %s",
+                self._state.agent_id,
+            )
+            return
+        try:
+            path = save_certificate(cert, cost_line=cost_line)
+            sys.stderr.write(f"caspase: death certificate saved to {path}\n")
+            sys.stderr.flush()
+        except Exception:
+            logger.exception(
+                "caspase: failed to save death certificate for agent %s",
+                self._state.agent_id,
+            )
 
     # --- death cert posting --------------------------------------------------
 
@@ -401,6 +468,23 @@ class CaspasePlugin:
             self._state.agent_id,
             kill_event_id,
         )
+
+
+# --- cost formatting ---------------------------------------------------------
+
+
+def _format_cost_line(state: WatcherState) -> str:
+    """One-line cost summary for the local death cert, e.g.
+    ``$0.42  ·  18.2k in / 2.1k out``. Reads the watcher's cumulative
+    token/cost counters (which the cert itself doesn't carry)."""
+
+    def _k(n: int) -> str:
+        return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+    return (
+        f"${state.total_cost_usd:.2f}  ·  "
+        f"{_k(state.total_input_tokens)} in / {_k(state.total_output_tokens)} out"
+    )
 
 
 # --- token extraction --------------------------------------------------------
