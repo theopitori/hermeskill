@@ -1,9 +1,11 @@
 name: caspase
-version: "0.1.0a0"
-description: "Apoptosis supervision for Hermes Agent — watches every tool call and LLM turn, terminates runaway agents cleanly, and posts a death certificate."
+version: "0.1.0a1"
+description: "Apoptosis supervision for Hermes Agent — watches every tool call and LLM turn, terminates runaway agents cleanly, and writes a death certificate."
 author: Caspase Contributors
-requires_env:
-  - CASPASE_API_KEY
+# No required env vars: Caspase runs local-only out of the box (in-process
+# symptom checks + a locally printed/saved death cert). CASPASE_API_KEY +
+# CASPASE_BASE_URL are optional — they add control-plane archival, fleet
+# visibility, manual kill, and grants.
 hooks:
   - pre_tool_call
   - post_tool_call

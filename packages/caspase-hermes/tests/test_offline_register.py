@@ -71,10 +71,14 @@ async def test_setup_falls_back_to_local_when_control_plane_unreachable() -> Non
     assert state.offline is True
     assert isinstance(state.agent_id, UUID)
     assert state.watchdog is not None
-    # Registered in the process registry so the worker/poller can see it.
+    # Registered in the process registry so a later (online) session's worker
+    # could still see it.
     assert get_watcher(state.agent_id) is state
-    # Worker is still booted — it tolerates a down control plane on its own.
-    worker.assert_called_once()
+    # Worker is NOT booted offline: it only talks to the control plane
+    # (heartbeats, event drain, kill poll), which can never succeed here and
+    # would log a connection-refused traceback every few seconds. Local symptom
+    # checks + the L2 watchdog run independently, so the kill path is intact.
+    worker.assert_not_called()
 
 
 async def test_setup_does_not_swallow_auth_errors() -> None:
@@ -141,3 +145,101 @@ async def test_offline_loop_detection_still_fires_and_blocks() -> None:
     assert "caspase" in directive["message"].lower()
     # The agent is still locally tracked even though it's invisible to the CP.
     assert plugin._state in all_watchers()
+
+
+# --- keyless (no API key) → forced offline, zero network ---------------------
+
+
+async def test_forced_offline_skips_registration_and_worker() -> None:
+    """No API key → forced_offline: registration is never attempted (so we
+    never hit the not-swallowed AuthError against a reachable localhost) and
+    the network worker/poller are never booted."""
+    client = MagicMock()
+    client.register_agent = AsyncMock(
+        side_effect=AssertionError("register_agent must not be called when forced_offline")
+    )
+    plugin = CaspasePlugin(
+        name="t", policy="coding-default", client=client, forced_offline=True
+    )
+    with patch("caspase_hermes.plugin.ensure_worker_started") as worker:
+        await plugin.setup()
+
+    assert plugin._state is not None
+    assert plugin._state.offline is True
+    client.register_agent.assert_not_called()
+    worker.assert_not_called()
+
+
+async def test_keyless_async_register_is_forced_offline() -> None:
+    """register() with no API key builds the client with allow_keyless=True and
+    runs the plugin forced-offline — all five hooks wired, no worker booted."""
+    ctx = MagicMock()
+    ctx.register_hook = MagicMock()
+
+    with (
+        patch("caspase_hermes.SDKConfig") as sdk_config,
+        patch("caspase_hermes.CaspaseClient") as client_cls,
+        patch("caspase_hermes.plugin.ensure_worker_started") as worker,
+    ):
+        loaded = MagicMock()
+        loaded.policy = None
+        loaded.agent_name = None
+        loaded.api_key = None  # the keyless trigger
+        loaded.local_cert = True
+        sdk_config.load.return_value = loaded
+        keyless_client = MagicMock()
+        keyless_client.register_agent = AsyncMock(
+            side_effect=AssertionError("no network call when keyless")
+        )
+        client_cls.from_config.return_value = keyless_client
+        await caspase_hermes.async_register(ctx)
+
+    plugin = caspase_hermes._current_plugin
+    assert plugin is not None
+    assert plugin._forced_offline is True
+    assert plugin._state is not None and plugin._state.offline is True
+    worker.assert_not_called()
+    # The plugin asked for a keyless client rather than letting from_config raise.
+    assert client_cls.from_config.call_args.kwargs.get("allow_keyless") is True
+    registered = {call.args[0] for call in ctx.register_hook.call_args_list}
+    assert registered == VALID_HOOK_NAMES
+
+
+# --- local death certificate on a kill --------------------------------------
+
+
+async def test_offline_session_end_emits_local_cert_and_skips_post() -> None:
+    """On an offline kill, session_end renders/saves the cert locally and does
+    NOT POST it (there's no control plane to post to)."""
+    plugin = CaspasePlugin(
+        name="t", policy="coding-default", client=_offline_client(), local_cert=True
+    )
+    with patch("caspase_hermes.plugin.ensure_worker_started"):
+        await plugin.setup()
+    assert plugin._state is not None
+    plugin._state.request_termination("loop test")
+
+    with (
+        patch.object(plugin, "_emit_local_cert") as emit,
+        patch.object(plugin, "_post_death_cert_best_effort") as post,
+    ):
+        plugin.session_end()
+
+    emit.assert_called_once()
+    post.assert_not_called()
+
+
+async def test_local_cert_disabled_suppresses_local_render() -> None:
+    """local_cert=False → no local render even on a kill."""
+    plugin = CaspasePlugin(
+        name="t", policy="coding-default", client=_offline_client(), local_cert=False
+    )
+    with patch("caspase_hermes.plugin.ensure_worker_started"):
+        await plugin.setup()
+    assert plugin._state is not None
+    plugin._state.request_termination("loop test")
+
+    with patch.object(plugin, "_emit_local_cert") as emit:
+        plugin.session_end()
+
+    emit.assert_not_called()

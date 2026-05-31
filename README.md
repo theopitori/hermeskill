@@ -8,17 +8,25 @@ certificate** — a forensic record of exactly why it died.
 Works with **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** today
 (LangGraph adapter planned).
 
-```bash
-# Install the plugin into Hermes' environment:
-uv tool install hermes-agent --with caspase-hermes==0.1.0a0
+## Quickstart (60 seconds, no control plane, no API key)
 
-# Enable it: add `caspase` to plugins.enabled in ~/.hermes/config.yaml
-# Point it at your control plane:
-export CASPASE_API_KEY=sk-...
-export CASPASE_BASE_URL=https://your-control-plane
+Three steps. Supervision runs **in-process** — no server to stand up, no key to
+set, nothing to configure.
+
+```bash
+# 1. Install the plugin into Hermes' environment:
+uv tool install hermes-agent --with caspase-hermes
+
+# 2. Enable it (one shot — flips plugins.enabled in your Hermes config):
+caspase enable-hermes
+
+# 3. Run Hermes as usual. Caspase now watches every session:
+hermes
 ```
 
-That's it. When an agent goes rogue, you get a death certificate:
+When an agent goes rogue — loops, blows its budget, runs too long, reaches for
+an off-limits tool — Caspase kills it and **prints a death certificate to your
+terminal, saving a copy to `~/.caspase/kills/`**:
 
 ```text
 ┌─ DEATH CERTIFICATE ───────────────────────────────────
@@ -34,6 +42,13 @@ That's it. When an agent goes rogue, you get a death certificate:
 Proof it's real: a [Hermes + GPT-4o kill, verbatim](docs/real-kill.md) · or
 reproduce the engine offline with no API key via
 [`python -m demo`](docs/offline-demo.md).
+
+That's the whole main function — **kill + autopsy, zero config**. The symptom
+checks (loop, cost, wall-clock, tool-scope) run entirely in your agent's
+process and need no network. Running a control plane is an **optional level-up**
+([below](#level-up-run-a-control-plane)) that adds persistent/queryable history,
+fleet visibility across agents, operator-issued manual kills, and grants — turn
+it off and you still get the kill and the certificate.
 
 ## What the kill actually does
 
@@ -110,16 +125,19 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Advanced: supervising a real runtime (Hermes)
+## Level up: run a control plane
 
-> The [offline engine demo](docs/offline-demo.md) shows the engine end-to-end
-> with no key. This section is for wiring Caspase into an actual agent runtime —
-> today that's [Hermes Agent](https://github.com/NousResearch/hermes-agent). It
-> needs an LLM provider and a little more setup.
+The [Quickstart](#quickstart-60-seconds-no-control-plane-no-api-key) already
+kills runaway agents and hands you a death certificate. A **control plane** adds
+the operator layer on top: persistent, queryable kill history; a live fleet view
+across every agent; operator-issued **manual kills**; and **grants** to
+pre-authorize a kill that would otherwise be wrong. Nothing below changes the
+kill itself — it makes the kills *visible and governable across a team*.
 
 This walks you through a real Hermes session being killed by Caspase on the
-`loop` symptom. Two terminals, ~5 minutes of setup the first time, no
-Postgres required (uses an in-process SQLite control plane).
+`loop` symptom, with the operator loop wired up. Two terminals, ~5 minutes of
+setup the first time, no Postgres required (uses an in-process SQLite control
+plane).
 
 ### 0. Clone and install
 
@@ -262,24 +280,13 @@ they work from any directory. Two installs, because they live in two places:
 # 1. The plugin goes INTO Hermes' own environment so Hermes can discover it.
 #    `--with` adds caspase-hermes to the same tool venv as hermes-agent, so
 #    entry-point discovery sees it.
-uv tool install hermes-agent --with caspase-hermes==0.1.0a0
+uv tool install hermes-agent --with caspase-hermes==0.1.0a1
 
 # 2. The `caspase` operator CLI is a separate global tool.
-uv tool install caspase==0.1.0a0
+uv tool install caspase==0.1.0a1
 ```
 
-> **Heads-up on the published alpha.** PyPI currently carries `caspase` /
-> `caspase-hermes` at `0.1.0a0`, which predates the `caspase init` / `rm` /
-> `prune` and `fleet --all/--status` commands below — those land in the next
-> alpha. Until then, install the CLI straight from a clone to get them
-> (verified to put `caspase` on your PATH and run from any directory):
->
-> ```bash
-> git clone https://github.com/theopitori/caspase.git && cd caspase
-> uv tool install ./packages/caspase-sdk         # global `caspase` CLI, all commands
-> ```
->
-> Pinning the exact version (rather than `--prerelease allow`) keeps the
+> **Note.** Pinning the exact version (rather than `--prerelease allow`) keeps the
 > dependency resolution on stable releases. Prefer `pipx`? `pipx install
 > hermes-agent` then `pipx inject hermes-agent caspase-hermes`, and `pipx
 > install caspase` for the CLI. A plain `pip install caspase-hermes` into your
@@ -287,21 +294,18 @@ uv tool install caspase==0.1.0a0
 > from its own isolated venv, so the plugin must be installed into *that* venv
 > (what `--with` / `pipx inject` do for you).
 
-Then enable the plugin and point it at your control plane:
+Then enable the plugin. For local-only supervision you're already done after
+this one command — skip the `caspase init` below unless you're wiring up a
+control plane:
 
 ```bash
-# Enable: add `caspase` to plugins.enabled in your Hermes config
-# (~/.hermes/config.yaml). `hermes plugins enable` only manages git-installed
-# plugins, not pip/entry-point plugins like this one.
-cat >> ~/.hermes/config.yaml <<'YAML'
-plugins:
-  enabled:
-    - caspase
-YAML
+# Enable the plugin (flips plugins.enabled in your Hermes config). Use this
+# instead of `hermes plugins enable`, which only manages git-installed plugins,
+# not pip/entry-point plugins like this one.
+caspase enable-hermes
 
-# Write your settings once, instead of exporting four env vars every shell.
-# This creates ~/.caspase/config.toml (chmod 0600 — it holds your API key),
-# read from your home dir so it works from any directory.
+# OPTIONAL — only if you run a control plane. Writes ~/.caspase/config.toml
+# (chmod 0600 — it holds your API key) so you don't export env vars every shell.
 caspase init \
     --api-key sk-... \
     --base-url https://your-control-plane.example.com \
@@ -375,6 +379,7 @@ Customers can also pass a custom `Policy` object via `policy=...` on the watch c
 ## Operator CLI
 
 ```bash
+caspase enable-hermes                        # add caspase to Hermes' plugins.enabled (one shot)
 caspase init --api-key sk-... --base-url https://...  # write ~/.caspase/config.toml once
 caspase fleet                                # active agents + status (hides terminal)
 caspase fleet --all                          # include terminated/zombie agents
@@ -422,12 +427,16 @@ caspase grant <agent_id> \
 
 ## Environment variables
 
+**None are required for the quickstart** — Caspase runs local-only with no env
+vars set. These configure the control-plane level-up.
+
 | Variable | Used for | When required |
 |---|---|---|
-| `CASPASE_API_KEY` | Agent → control plane authentication | Always |
+| `CASPASE_API_KEY` | Agent → control plane authentication | **Optional.** Unset ⇒ local-only (kill + local cert, no archival) |
 | `CASPASE_BASE_URL` | Control plane URL | If not `http://localhost:8000` |
 | `CASPASE_AGENT_NAME` | Display name for the registered agent | Optional |
 | `CASPASE_POLICY` | Named policy override | Optional |
+| `CASPASE_LOCAL_CERT` | Print + save the death cert locally on a kill | Optional (default: on; set `0` to disable) |
 | `CASPASE_DB_URL` | Control-plane Postgres DSN | Control plane only |
 | `CASPASE_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
 

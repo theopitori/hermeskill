@@ -52,6 +52,11 @@ class SDKConfig(BaseModel):
     # vars. `None` means "not configured; let the adapter decide".
     policy: str | None = None
     agent_name: str | None = None
+    # When a kill fires, render the death certificate to the terminal and save
+    # it under ~/.caspase/kills/ — so the autopsy is delivered even with no
+    # control plane. On by default; set CASPASE_LOCAL_CERT=0 (or local_cert =
+    # false in config.toml) to disable.
+    local_cert: bool = True
 
     @classmethod
     def load(cls) -> SDKConfig:
@@ -72,6 +77,14 @@ class SDKConfig(BaseModel):
             data["policy"] = env_policy
         if env_name := os.environ.get("CASPASE_AGENT_NAME"):
             data["agent_name"] = env_name
+        if (env_cert := os.environ.get("CASPASE_LOCAL_CERT")) is not None:
+            data["local_cert"] = env_cert.strip().lower() not in {
+                "0",
+                "false",
+                "no",
+                "off",
+                "",
+            }
         return cls.model_validate(data)
 
 
@@ -98,6 +111,9 @@ def save_config(config: SDKConfig, *, force: bool = False) -> Path:
         lines.append(f"policy = {_q(config.policy)}")
     if config.agent_name:
         lines.append(f"agent_name = {_q(config.agent_name)}")
+    # Only persist when overriding the default (True) — keeps the file minimal.
+    if not config.local_cert:
+        lines.append("local_cert = false")
     CONFIG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         CONFIG_PATH.chmod(0o600)
