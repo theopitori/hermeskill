@@ -1,33 +1,39 @@
 # Caspase — an apoptosis protocol for AI agents
 
-Caspase watches every tool call and LLM turn of a running agent. The moment it
-sees a runaway loop, a budget breach, a wall-clock overrun, or an out-of-scope
-tool call, it **issues a cooperative shutdown and files an auditable death
-certificate**. Every kill is explainable.
+Install Caspase into your agent and it watches every tool call and LLM turn. The
+moment the agent loops, blows its budget, runs too long, or reaches for a tool
+it was never scoped to, Caspase **kills it and files an auditable death
+certificate** — a forensic record of exactly why it died.
 
-## See it kill a real Hermes agent
+Works with **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** today
+(LangGraph adapter planned).
 
-Caspase killing a **real** [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-session driving GPT-4o — nothing scripted; real model, real tokens, real cost:
+```bash
+# Install the plugin into Hermes' environment:
+uv tool install hermes-agent --with caspase-hermes==0.1.0a0
 
-> ```text
-> 10:39:36 tool      read_file
-> 10:39:36 symptom   loop (terminal) signature 'read_file|f969022d650c7957' repeated 3x in last 3 actions (cap 3)
-> 10:39:36 lifecycle session_end
-> ```
-> The agent got wedged re-reading the same file. On the 3rd identical call
-> Caspase surfaced the loop verdict to Hermes as a tool error and ended the
-> session cooperatively.
+# Enable it: add `caspase` to plugins.enabled in ~/.hermes/config.yaml
+# Point it at your control plane:
+export CASPASE_API_KEY=sk-...
+export CASPASE_BASE_URL=https://your-control-plane
+```
 
-Full verbatim walkthrough (setup, prompt, Hermes output, `caspase fleet` /
-`caspase logs`): **[docs/real-kill.md](docs/real-kill.md)**. Tested against
-`hermes-agent==0.14.0`. To reproduce it yourself, see
-[Advanced: supervising a real runtime](#advanced-supervising-a-real-runtime-hermes).
+That's it. When an agent goes rogue, you get a death certificate:
 
-> **No API key handy?** The same detection engine runs against a scripted agent —
-> fully offline, deterministic, and what CI asserts on — via `uv sync && uv run
-> python -m demo`. It proves the engine, not a real model; details in
-> **[docs/offline-demo.md](docs/offline-demo.md)**.
+```text
+┌─ DEATH CERTIFICATE ───────────────────────────────────
+│ agent      coding-agent-7
+│ trigger    auto / loop
+│ reason     read_file repeated 3x in last 3 actions (cap 3)
+│ symptoms   1 terminal  ·  loop
+│ shutdown   apoptosis_requested → block directive
+│ cost       $0.42  ·  18.2k in / 2.1k out
+└───────────────────────────────────────────────────────
+```
+
+Proof it's real: a [Hermes + GPT-4o kill, verbatim](docs/real-kill.md) · or
+reproduce the engine offline with no API key via
+[`python -m demo`](docs/offline-demo.md).
 
 ## What the kill actually does
 
