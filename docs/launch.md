@@ -51,7 +51,7 @@ untrusted/long-running agents you still want to run them in their own
 subprocess. The threat model and what it explicitly does NOT do are in
 SECURITY.md.
 
-Repo: https://github.com/theopidori/caspase
+Repo: https://github.com/theopitori/caspase
 Would love feedback on the symptom set — what runaway mode have you hit that
 these five checks would miss?
 ```
@@ -110,7 +110,7 @@ tokens, model id — reaches the control plane, which you run yourself.
 ```
 0.1 alpha. Hermes Agent today, more runtimes next.
 
-Repo + 5-min demo: https://github.com/theopidori/caspase
+Repo + 5-min demo: https://github.com/theopitori/caspase
 
 What runaway mode have you hit that these checks would've caught?
 ```

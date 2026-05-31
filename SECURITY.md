@@ -13,7 +13,7 @@ The 0.1.x line is the active pre-1.0 alpha. Once 1.0 ships, the previous minor w
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Report security issues via [GitHub's private vulnerability reporting](https://github.com/theopidori/caspase/security/advisories/new), or email the maintainers directly. Please include:
+Report security issues via [GitHub's private vulnerability reporting](https://github.com/theopitori/caspase/security/advisories/new), or email the maintainers directly. Please include:
 
 - Description of the vulnerability
 - Steps to reproduce

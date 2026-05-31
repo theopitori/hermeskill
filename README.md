@@ -155,7 +155,7 @@ Postgres required (uses an in-process SQLite control plane).
 ### 0. Clone and install
 
 ```powershell
-git clone https://github.com/theopidori/caspase.git
+git clone https://github.com/theopitori/caspase.git
 cd caspase
 uv sync
 ```
@@ -613,7 +613,7 @@ caspase/
 ## Contributing
 
 ```bash
-git clone https://github.com/theopidori/caspase.git
+git clone https://github.com/theopitori/caspase.git
 cd caspase
 uv sync                                          # installs all workspace packages
 
