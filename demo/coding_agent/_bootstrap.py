@@ -21,9 +21,12 @@ import httpx
 import uvicorn
 
 _DEV_DEVELOPER_KEY = "sk_dev_developer_local_only_do_not_ship"
+_DEV_OPERATOR_KEY = "sk_dev_operator_local_only_do_not_ship"
 _CUSTOMER_ID = "11111111-1111-4111-8111-111111111111"
 _API_KEY_ID = "22222222-2222-4222-8222-222222222222"
 _API_KEY_NAME = "Demo Dev Key"
+_OPERATOR_KEY_ID = "33333333-3333-4333-8333-333333333333"
+_OPERATOR_KEY_NAME = "Demo Operator Key"
 
 
 def _sha256(raw: str) -> str:
@@ -128,6 +131,22 @@ async def start_control_plane() -> tuple[uvicorn.Server, asyncio.Task[Any]]:
                 "name": _API_KEY_NAME,
                 "role": "developer",
                 "hash": _sha256(_DEV_DEVELOPER_KEY),
+            },
+        )
+        # Operator-role key so demo scenarios can exercise operator-only
+        # endpoints (e.g. POST /terminate for the manual-kill scenario).
+        await conn.execute(
+            text(
+                "INSERT OR IGNORE INTO api_keys "
+                "(id, customer_id, name, role, key_hash, created_at) "
+                "VALUES (:id, :cid, :name, :role, :hash, CURRENT_TIMESTAMP)"
+            ),
+            {
+                "id": _OPERATOR_KEY_ID,
+                "cid": _CUSTOMER_ID,
+                "name": _OPERATOR_KEY_NAME,
+                "role": "operator",
+                "hash": _sha256(_DEV_OPERATOR_KEY),
             },
         )
 

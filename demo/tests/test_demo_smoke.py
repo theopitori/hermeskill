@@ -65,6 +65,24 @@ async def test_hardkill_supervisor_kills_wedged_child_and_files_cert() -> None:
     assert outcome.kill_event_id != -1
 
 
+async def test_manualkill_operator_terminates_and_confirms_cert() -> None:
+    """The M4 manual-kill scenario: an operator terminates a well-behaved agent.
+
+    Exercises the real two-sided path end-to-end on SQLite — operator
+    POST /terminate, the SDK kill-pending poll, cooperative request_termination,
+    and cert confirmation. The cert must be stamped MANUAL with the operator's
+    reason (no symptom involved).
+    """
+    from demo.manualkill import run_manualkill_demo
+
+    outcome = await run_manualkill_demo(quiet=True)
+    assert outcome.killed is True
+    assert outcome.trigger == "manual"
+    assert outcome.operator_reason is not None
+    assert outcome.kill_event_id is not None
+    assert outcome.kill_event_id != -1
+
+
 async def test_calibrate_scenario_labels_kills_and_surfaces_suggestion() -> None:
     """The Phase-4 calibrate scenario files labelled kills and tunes a hint.
 

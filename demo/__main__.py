@@ -59,6 +59,7 @@ from demo.coding_agent._bootstrap import (
     start_control_plane,
 )
 from demo.hardkill import run_hardkill_demo
+from demo.manualkill import run_manualkill_demo
 from demo.rogue import (
     DEFAULT_SCENARIO,
     SCENARIOS,
@@ -81,6 +82,8 @@ _SCENARIO_BLURB = {
     "time budget and is terminated.",
     "hardkill": "L3 supervisor: a CPU-wedged agent that ignores cooperative "
     "shutdown is force-killed (SIGKILL) in its child process.",
+    "manualkill": "operator override: a well-behaved agent is terminated by hand "
+    "via `caspase kill` — it stops cooperatively at the next tool call (no symptom).",
     "calibrate": "feedback loop: files several loop-kills, labels most "
     "false-positive via the real feedback endpoint, then shows the advisory "
     "'raise the loop cap' suggestion Caspase derives — suggest-only, never auto-applied.",
@@ -89,7 +92,7 @@ _SCENARIO_BLURB = {
 # Engine scenarios (run in-process via the watcher), the L3 hardkill scenario
 # (spawns + supervises a real child process), and the Phase-4 calibrate
 # scenario (files labelled kills, then surfaces a tuning suggestion).
-_ALL_SCENARIOS = (*SCENARIOS, "hardkill", "calibrate")
+_ALL_SCENARIOS = (*SCENARIOS, "hardkill", "manualkill", "calibrate")
 
 
 @dataclass(slots=True)
@@ -251,6 +254,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.scenario == "hardkill":
             hk = asyncio.run(run_hardkill_demo())
             return 0 if hk.killed else 1
+        if args.scenario == "manualkill":
+            mk = asyncio.run(run_manualkill_demo())
+            return 0 if mk.killed else 1
         if args.scenario == "calibrate":
             cal = asyncio.run(run_calibrate_demo())
             return 0 if cal.loop_suggested_value is not None else 1

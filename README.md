@@ -3,8 +3,8 @@
 Caspase watches every tool call and LLM turn of a running agent. The moment it
 sees a runaway loop, a budget breach, a wall-clock overrun, or an out-of-scope
 tool call, it **issues a cooperative shutdown and files an auditable death
-certificate**. Every kill is explainable, and every claim below is backed by a
-one-command demo you can run offline.
+certificate**. Every kill is explainable — backed by a one-command offline demo
+(below) and by a [real Hermes + GPT-4o kill](docs/real-kill.md) you can reproduce.
 
 ## See it in 60 seconds — no API key, no Postgres
 
@@ -58,8 +58,29 @@ into a loop, and files a death certificate — fully offline and deterministic:
 > *cooperative* one. See [What the kill actually does](#what-the-kill-actually-does)
 > for the honest mechanics.
 
-Try the other symptoms: `uv run python -m demo --scenario cost|scope|wall_clock`
-(or `--list`). Each is deterministic and offline.
+Try the other scenarios: `cost`, `scope`, `wall_clock`, `manualkill` (operator
+override via `caspase kill`), and `hardkill` (OS-level SIGKILL of a wedged
+process) — e.g. `uv run python -m demo --scenario manualkill` (or `--list`).
+Each is deterministic and offline.
+
+## See it kill a real Hermes agent
+
+The demo above proves the **engine** with no API key. To see that same engine
+kill a **real** [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+session driving GPT-4o — nothing scripted:
+
+> ```text
+> 10:39:36 tool      read_file
+> 10:39:36 symptom   loop (terminal) signature 'read_file|f969022d650c7957' repeated 3x in last 3 actions (cap 3)
+> 10:39:36 lifecycle session_end
+> ```
+> Caspase surfaced that verdict to Hermes as a tool error and ended the session
+> cooperatively — real model, real tokens, real cost.
+
+Full verbatim walkthrough (setup, prompt, Hermes output, `caspase fleet` /
+`caspase logs`): **[docs/real-kill.md](docs/real-kill.md)**. Tested against
+`hermes-agent==0.14.0`. To reproduce it yourself, see
+[Advanced: supervising a real runtime](#advanced-supervising-a-real-runtime-hermes).
 
 ## What the kill actually does
 
@@ -270,7 +291,8 @@ control plane's REST API.
   fires `wall_clock` after 5 minutes.
 - **Manual kill:** while a session is running, in a third terminal:
   `uv run caspase kill <agent_id> --reason "operator demo"` — the next
-  `pre_tool_call` blocks with `manual_kill`.
+  `pre_tool_call` blocks with `manual_kill`. See the whole operator→agent path
+  offline (no key) with `uv run python -m demo --scenario manualkill`.
 
 ### Stopping the control plane
 
