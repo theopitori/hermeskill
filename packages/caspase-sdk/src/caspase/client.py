@@ -140,13 +140,30 @@ class CaspaseClient:
         data = await self._request("POST", "/agents", json=body)
         return AgentRegistrationOut.model_validate(data)
 
-    async def list_agents(self) -> list[AgentSummary]:
-        data = await self._request("GET", "/agents")
+    async def list_agents(self, *, status: str | None = None) -> list[AgentSummary]:
+        params = {"status": status} if status else None
+        data = await self._request("GET", "/agents", params=params)
         return [AgentSummary.model_validate(a) for a in data]
 
     async def get_agent(self, agent_id: UUID | str) -> AgentSummary:
         data = await self._request("GET", f"/agents/{agent_id}")
         return AgentSummary.model_validate(data)
+
+    async def delete_agent(self, agent_id: UUID | str) -> None:
+        """Delete an agent and its history (events, kill events, grants).
+
+        Operator-only and irreversible. 404 if the agent doesn't exist or
+        belongs to another customer.
+        """
+        await self._request("DELETE", f"/agents/{agent_id}")
+
+    async def prune_agents(self, *, status: str = "terminated") -> int:
+        """Bulk-delete the caller's agents in `status`. Returns the count deleted.
+
+        Operator-only and irreversible. Scoped to the caller's customer.
+        """
+        data = await self._request("POST", "/agents/prune", json={"status": status})
+        return int(data["deleted"])
 
     # --- heartbeats -------------------------------------------------------
 

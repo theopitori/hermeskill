@@ -63,7 +63,6 @@ Public surface
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from caspase.client import CaspaseClient
@@ -87,10 +86,12 @@ def register(ctx: Any) -> None:
     """
     global _current_plugin
 
-    name = os.environ.get("CASPASE_AGENT_NAME", "hermes")
-    policy = os.environ.get("CASPASE_POLICY", "coding-default")
-
+    # Resolve via SDKConfig so agent name / policy can come from
+    # ~/.caspase/config.toml (written by `caspase init`) or env vars, not just
+    # env. The adapter owns the Hermes-specific defaults when unset.
     config = SDKConfig.load()
+    name = config.agent_name or "hermes"
+    policy = config.policy or "coding-default"
     client = CaspaseClient.from_config(config)
 
     plugin = CaspasePlugin(name=name, policy=policy, client=client)
@@ -112,10 +113,12 @@ async def async_register(ctx: Any) -> None:
     """Async variant of register() for callers inside a running event loop."""
     global _current_plugin
 
-    name = os.environ.get("CASPASE_AGENT_NAME", "hermes")
-    policy = os.environ.get("CASPASE_POLICY", "coding-default")
-
+    # Resolve via SDKConfig so agent name / policy can come from
+    # ~/.caspase/config.toml (written by `caspase init`) or env vars, not just
+    # env. The adapter owns the Hermes-specific defaults when unset.
     config = SDKConfig.load()
+    name = config.agent_name or "hermes"
+    policy = config.policy or "coding-default"
     client = CaspaseClient.from_config(config)
 
     plugin = CaspasePlugin(name=name, policy=policy, client=client)

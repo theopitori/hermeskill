@@ -31,6 +31,7 @@ from caspase.client import (
     NotFoundError,
     TransportError,
 )
+from caspase.config import DEFAULT_BASE_URL, SDKConfig, save_config
 from caspase.exceptions import CaspaseError
 from caspase.policies import UnknownPolicyError, resolve_policy
 from caspase.types import (
@@ -79,6 +80,53 @@ def main(
     _ = version
 
 
+# --- init ----------------------------------------------------------------
+
+
+@app.command()
+def init(
+    api_key: str = typer.Option(
+        ...,
+        "--api-key",
+        help="Your Caspase API key. For `kill`/`rm`/`prune` use an "
+        "operator-role key (it also works for read commands + agents).",
+    ),
+    base_url: str = typer.Option(
+        DEFAULT_BASE_URL, "--base-url", help="Control plane URL."
+    ),
+    policy: str | None = typer.Option(
+        None, "--policy", help="Default policy name for watched agents."
+    ),
+    agent_name: str | None = typer.Option(
+        None, "--agent-name", help="Default display name for this agent."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite an existing config file."
+    ),
+) -> None:
+    """Write ~/.caspase/config.toml so you don't set env vars every session.
+
+    Resolution order is unchanged (env vars still override the file), but once
+    written the SDK and CLI read the file from your home directory — so they
+    work from any directory, not just inside the repo.
+    """
+    config = SDKConfig(
+        base_url=base_url, api_key=api_key, policy=policy, agent_name=agent_name
+    )
+    try:
+        path = save_config(config, force=force)
+    except FileExistsError as exc:
+        err_console.print(
+            f"[yellow]config already exists:[/yellow] {exc}\n"
+            "[dim]Re-run with --force to overwrite it.[/dim]"
+        )
+        raise typer.Exit(3) from exc
+    console.print(f"[green]✓[/green] wrote {path}")
+    console.print(
+        "[dim]env vars (CASPASE_API_KEY, …) still override this file when set.[/dim]"
+    )
+
+
 # --- shared error handling ----------------------------------------------
 
 
@@ -106,15 +154,29 @@ def _run(coro: object) -> None:
 # --- fleet ---------------------------------------------------------------
 
 
+# Statuses hidden from the default fleet view — terminal states that
+# otherwise pile up forever. `--all` shows them; `--status` targets one.
+_INACTIVE_STATUSES = frozenset({AgentStatus.TERMINATED, AgentStatus.ZOMBIE})
+
+
 @app.command()
-def fleet() -> None:
-    """List registered agents and their statuses."""
-    _run(_fleet())
+def fleet(
+    all_: bool = typer.Option(
+        False, "--all", "-a", help="Include terminated/zombie agents."
+    ),
+    status: str | None = typer.Option(
+        None, "--status", help="Show only agents in this status (e.g. terminated)."
+    ),
+) -> None:
+    """List agents. Defaults to active only; use --all or --status to widen."""
+    _run(_fleet(all_=all_, status=status))
 
 
-async def _fleet() -> None:
+async def _fleet(*, all_: bool, status: str | None) -> None:
     async with CaspaseClient.from_config() as client:
-        agents = await client.list_agents()
+        agents = await client.list_agents(status=status)
+    if status is None and not all_:
+        agents = [a for a in agents if a.status not in _INACTIVE_STATUSES]
     _render_fleet(agents)
 
 
@@ -141,6 +203,61 @@ def _render_fleet(agents: list[AgentSummary]) -> None:
             reg,
         )
     console.print(table)
+
+
+# --- rm / prune ----------------------------------------------------------
+
+
+@app.command()
+def rm(
+    agent_id: str = typer.Argument(..., help="Agent UUID. See `caspase fleet --all`."),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip the confirmation prompt."
+    ),
+) -> None:
+    """Delete an agent and its history (events, kill events, grants).
+
+    Destructive and irreversible — requires an operator-role key. Use this to
+    stop old agents piling up in the fleet.
+    """
+    if not yes:
+        typer.confirm(
+            f"Permanently delete agent {agent_id} and all its history?", abort=True
+        )
+    _run(_rm(agent_id))
+
+
+async def _rm(agent_id: str) -> None:
+    async with CaspaseClient.from_config() as client:
+        await client.delete_agent(agent_id)
+    console.print(f"[green]✓[/green] deleted agent {agent_id}")
+
+
+@app.command()
+def prune(
+    status: str = typer.Option(
+        "terminated", "--status", help="Delete all your agents in this status."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip the confirmation prompt."
+    ),
+) -> None:
+    """Bulk-delete agents in a terminal status (default: terminated).
+
+    Destructive and irreversible — requires an operator-role key. Scoped to
+    your own agents only.
+    """
+    if not yes:
+        typer.confirm(
+            f"Permanently delete ALL '{status}' agents and their history?", abort=True
+        )
+    _run(_prune(status))
+
+
+async def _prune(status: str) -> None:
+    async with CaspaseClient.from_config() as client:
+        deleted = await client.prune_agents(status=status)
+    console.print(f"[green]✓[/green] pruned {deleted} agent(s) in status '{status}'")
 
 
 # --- logs ----------------------------------------------------------------

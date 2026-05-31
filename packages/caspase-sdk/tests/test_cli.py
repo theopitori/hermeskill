@@ -91,7 +91,8 @@ def test_fleet_renders_table_of_agents() -> None:
         return httpx.Response(200, json=agents)
 
     _set_handler(handler)
-    result = runner.invoke(app, ["fleet"])
+    # --all so the terminated "beta" shows (default fleet view hides terminal).
+    result = runner.invoke(app, ["fleet", "--all"])
     assert result.exit_code == 0, result.stdout
     assert "alpha" in result.stdout
     assert "beta" in result.stdout
@@ -547,3 +548,186 @@ def test_set_handler_isolates_between_tests() -> None:
     # When this test exits, the fixture will reset _handler to None.
     # Silence unused-import lint
     _ = _json
+
+
+# --- fleet filtering -----------------------------------------------------
+
+
+def _two_agents() -> list[dict[str, Any]]:
+    now = datetime.now(UTC).isoformat()
+    return [
+        {
+            "id": str(uuid4()),
+            "name": "live-one",
+            "policy_name": "coding-default",
+            "status": "running",
+            "registered_at": now,
+            "last_heartbeat_at": now,
+            "terminated_at": None,
+        },
+        {
+            "id": str(uuid4()),
+            "name": "dead-one",
+            "policy_name": "strict",
+            "status": "terminated",
+            "registered_at": now,
+            "last_heartbeat_at": None,
+            "terminated_at": now,
+        },
+    ]
+
+
+def test_fleet_default_hides_terminated() -> None:
+    _set_handler(lambda _req: httpx.Response(200, json=_two_agents()))
+    result = runner.invoke(app, ["fleet"])
+    assert result.exit_code == 0, result.stdout
+    assert "live-one" in result.stdout
+    assert "dead-one" not in result.stdout
+
+
+def test_fleet_all_shows_terminated() -> None:
+    _set_handler(lambda _req: httpx.Response(200, json=_two_agents()))
+    result = runner.invoke(app, ["fleet", "--all"])
+    assert result.exit_code == 0, result.stdout
+    assert "live-one" in result.stdout
+    assert "dead-one" in result.stdout
+
+
+def test_fleet_status_passes_query_param() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["status"] = req.url.params.get("status")
+        return httpx.Response(200, json=[_two_agents()[1]])
+
+    _set_handler(handler)
+    result = runner.invoke(app, ["fleet", "--status", "terminated"])
+    assert result.exit_code == 0, result.stdout
+    assert captured["status"] == "terminated"
+    # --status bypasses the client-side active-only filter.
+    assert "dead-one" in result.stdout
+
+
+# --- rm ------------------------------------------------------------------
+
+
+def test_rm_deletes_with_confirmation() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        return httpx.Response(204)
+
+    _set_handler(handler)
+    aid = str(uuid4())
+    result = runner.invoke(app, ["rm", aid], input="y\n")
+    assert result.exit_code == 0, result.stdout
+    assert captured["method"] == "DELETE"
+    assert captured["path"] == f"/agents/{aid}"
+    assert "deleted" in result.stdout
+
+
+def test_rm_aborts_on_no_confirmation() -> None:
+    called = {"hit": False}
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        called["hit"] = True
+        return httpx.Response(204)
+
+    _set_handler(handler)
+    result = runner.invoke(app, ["rm", str(uuid4())], input="n\n")
+    assert result.exit_code != 0
+    assert called["hit"] is False  # no request issued when aborted
+
+
+def test_rm_yes_skips_prompt() -> None:
+    _set_handler(lambda _req: httpx.Response(204))
+    result = runner.invoke(app, ["rm", str(uuid4()), "--yes"])
+    assert result.exit_code == 0, result.stdout
+
+
+def test_rm_403_treated_as_auth_error() -> None:
+    """Developer key on operator-only rm → 403 → AuthError → exit 2."""
+    _set_handler(lambda _req: httpx.Response(403, json={"detail": "operator role required"}))
+    result = runner.invoke(app, ["rm", str(uuid4()), "--yes"])
+    assert result.exit_code == 2
+
+
+# --- prune ---------------------------------------------------------------
+
+
+def test_prune_posts_and_reports_count() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["body"] = _json.loads(req.content)
+        return httpx.Response(200, json={"deleted": 3})
+
+    _set_handler(handler)
+    result = runner.invoke(app, ["prune", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/agents/prune"
+    assert captured["body"] == {"status": "terminated"}
+    assert "pruned 3" in result.stdout
+
+
+def test_prune_aborts_on_no_confirmation() -> None:
+    called = {"hit": False}
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        called["hit"] = True
+        return httpx.Response(200, json={"deleted": 0})
+
+    _set_handler(handler)
+    result = runner.invoke(app, ["prune"], input="n\n")
+    assert result.exit_code != 0
+    assert called["hit"] is False
+
+
+# --- init ----------------------------------------------------------------
+
+
+def test_init_writes_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    import caspase.config as config_mod
+
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", cfg)
+    result = runner.invoke(
+        app,
+        ["init", "--api-key", "sk_op_123", "--policy", "strict"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert cfg.exists()
+    text = cfg.read_text(encoding="utf-8")
+    assert 'api_key = "sk_op_123"' in text
+    assert 'policy = "strict"' in text
+
+
+def test_init_refuses_existing_without_force(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    import caspase.config as config_mod
+
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", cfg)
+    r1 = runner.invoke(app, ["init", "--api-key", "sk_first"])
+    assert r1.exit_code == 0, r1.stdout
+    r2 = runner.invoke(app, ["init", "--api-key", "sk_second"])
+    assert r2.exit_code == 3
+    # Unchanged.
+    assert 'api_key = "sk_first"' in cfg.read_text(encoding="utf-8")
+
+
+def test_init_force_overwrites(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    import caspase.config as config_mod
+
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", cfg)
+    runner.invoke(app, ["init", "--api-key", "sk_first"])
+    r2 = runner.invoke(app, ["init", "--api-key", "sk_second", "--force"])
+    assert r2.exit_code == 0, r2.stdout
+    assert 'api_key = "sk_second"' in cfg.read_text(encoding="utf-8")

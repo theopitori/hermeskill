@@ -102,7 +102,11 @@ async def test_offline_async_register_wires_all_five_hooks() -> None:
         patch("caspase_hermes.CaspaseClient") as client_cls,
         patch("caspase_hermes.plugin.ensure_worker_started"),
     ):
-        sdk_config.load.return_value = MagicMock()
+        # Unset policy/agent_name → adapter applies its own defaults.
+        loaded_config = MagicMock()
+        loaded_config.policy = None
+        loaded_config.agent_name = None
+        sdk_config.load.return_value = loaded_config
         client_cls.from_config.return_value = _offline_client()
         await caspase_hermes.async_register(ctx)
 

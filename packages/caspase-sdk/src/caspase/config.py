@@ -2,16 +2,19 @@
 
 Resolution order (highest wins):
   1. explicit kwargs to `watch()` / `Client(...)`
-  2. environment variables (CASPASE_API_KEY, CASPASE_BASE_URL)
+  2. environment variables (CASPASE_API_KEY, CASPASE_BASE_URL,
+     CASPASE_POLICY, CASPASE_AGENT_NAME)
   3. `~/.caspase/config.toml`
   4. built-in defaults
 
-Filled lightly in M0 so other modules can import a stable type; the
-file-loading path is exercised in M1 when the CLI gains real subcommands.
+Write the config file once with `caspase init` so the per-session env-var
+dance (export four vars every shell) isn't needed — the file is read from the
+user's home dir, so it works from any directory, not just the repo.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tomllib
 from pathlib import Path
@@ -43,6 +46,12 @@ def _load_dotenv_into_environ(path: Path = Path(".env")) -> None:
 class SDKConfig(BaseModel):
     base_url: str = Field(default=DEFAULT_BASE_URL)
     api_key: str | None = None
+    # Runtime-adapter hints (e.g. caspase-hermes). Optional here in the core
+    # SDK — the adapter applies its own defaults when these are unset — but
+    # surfaced so they can live in config.toml and stop being per-session env
+    # vars. `None` means "not configured; let the adapter decide".
+    policy: str | None = None
+    agent_name: str | None = None
 
     @classmethod
     def load(cls) -> SDKConfig:
@@ -59,4 +68,37 @@ class SDKConfig(BaseModel):
             data["base_url"] = env_url
         if env_key := os.environ.get("CASPASE_API_KEY"):
             data["api_key"] = env_key
+        if env_policy := os.environ.get("CASPASE_POLICY"):
+            data["policy"] = env_policy
+        if env_name := os.environ.get("CASPASE_AGENT_NAME"):
+            data["agent_name"] = env_name
         return cls.model_validate(data)
+
+
+def save_config(config: SDKConfig, *, force: bool = False) -> Path:
+    """Write `config` to `~/.caspase/config.toml` and return the path.
+
+    Only non-empty values are persisted. Refuses to clobber an existing file
+    unless ``force=True`` (the CLI surfaces this as a clear error + `--force`
+    hint). The file holds an API key, so it's created `0600` on POSIX.
+    """
+    if CONFIG_PATH.exists() and not force:
+        raise FileExistsError(CONFIG_PATH)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    def _q(value: str) -> str:
+        # Minimal TOML basic-string quoting — escape backslash and quote.
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+
+    lines = [f"base_url = {_q(config.base_url)}"]
+    if config.api_key:
+        lines.append(f"api_key = {_q(config.api_key)}")
+    if config.policy:
+        lines.append(f"policy = {_q(config.policy)}")
+    if config.agent_name:
+        lines.append(f"agent_name = {_q(config.agent_name)}")
+    CONFIG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with contextlib.suppress(OSError):
+        CONFIG_PATH.chmod(0o600)
+    return CONFIG_PATH
