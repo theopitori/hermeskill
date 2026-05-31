@@ -281,13 +281,45 @@ file is recreated next time you start it, so demo data is ephemeral.
 
 ## Production install
 
-For real deployments, install the plugin into your existing Hermes
-environment and point it at a deployed control plane:
+The repo quickstart uses `uv run hermes …`, which only works **inside this
+project** — `uv run` resolves against the workspace in your current directory,
+so running it from `~` or anywhere else fails (`uv trampoline failed to spawn`).
+For day-to-day use you want `hermes` and `caspase` on your PATH globally, so
+they work from any directory. Two installs, because they live in two places:
 
 ```bash
-pip install caspase-hermes
+# 1. The plugin goes INTO Hermes' own environment so Hermes can discover it.
+#    `--with` adds caspase-hermes to the same tool venv as hermes-agent, so
+#    entry-point discovery sees it.
+uv tool install hermes-agent --with caspase-hermes==0.1.0a0
 
-# Enable the plugin: add `caspase` to plugins.enabled in your Hermes config
+# 2. The `caspase` operator CLI is a separate global tool.
+uv tool install caspase==0.1.0a0
+```
+
+> **Heads-up on the published alpha.** PyPI currently carries `caspase` /
+> `caspase-hermes` at `0.1.0a0`, which predates the `caspase init` / `rm` /
+> `prune` and `fleet --all/--status` commands below — those land in the next
+> alpha. Until then, install the CLI straight from a clone to get them
+> (verified to put `caspase` on your PATH and run from any directory):
+>
+> ```bash
+> git clone https://github.com/theopitori/caspase.git && cd caspase
+> uv tool install ./packages/caspase-sdk         # global `caspase` CLI, all commands
+> ```
+>
+> Pinning the exact version (rather than `--prerelease allow`) keeps the
+> dependency resolution on stable releases. Prefer `pipx`? `pipx install
+> hermes-agent` then `pipx inject hermes-agent caspase-hermes`, and `pipx
+> install caspase` for the CLI. A plain `pip install caspase-hermes` into your
+> shell's Python is **not** visible to a globally-installed Hermes — Hermes runs
+> from its own isolated venv, so the plugin must be installed into *that* venv
+> (what `--with` / `pipx inject` do for you).
+
+Then enable the plugin and point it at your control plane:
+
+```bash
+# Enable: add `caspase` to plugins.enabled in your Hermes config
 # (~/.hermes/config.yaml). `hermes plugins enable` only manages git-installed
 # plugins, not pip/entry-point plugins like this one.
 cat >> ~/.hermes/config.yaml <<'YAML'
@@ -296,27 +328,33 @@ plugins:
     - caspase
 YAML
 
-export CASPASE_API_KEY=sk-...
-export CASPASE_BASE_URL=https://your-control-plane.example.com
-export CASPASE_AGENT_NAME=my-coding-agent     # optional display name
-export CASPASE_POLICY=coding-default          # optional policy
+# Write your settings once, instead of exporting four env vars every shell.
+# This creates ~/.caspase/config.toml (chmod 0600 — it holds your API key),
+# read from your home dir so it works from any directory.
+caspase init \
+    --api-key sk-... \
+    --base-url https://your-control-plane.example.com \
+    --agent-name my-coding-agent \
+    --policy coding-default
 ```
 
-> **Install into the same environment Hermes runs from.** Entry-point discovery
-> only sees packages in Hermes' own interpreter. A global Hermes (e.g. installed
-> via `uv tool install` or its standalone installer) lives in an *isolated*
-> venv, so a plain `pip install caspase-hermes` in your shell won't be visible
-> to it — the plugin silently won't load. Install into Hermes' venv directly:
+`caspase init` is the persistent alternative to the per-session
+`export CASPASE_API_KEY=…` dance. Resolution order is unchanged — explicit
+env vars still override the file when set — so CI can keep using env vars while
+your laptop reads the config file. Use an **operator-role** key if you want
+`caspase kill` / `rm` / `prune` to work (it covers the read commands too).
+
+> **If the plugin silently won't load:** it's almost always installed in a
+> different environment than the one Hermes runs from. Confirm where Hermes
+> actually imports from and install there:
 >
 > ```bash
-> # find where Hermes actually runs from:
 > python -c "import importlib.util as u; print(u.find_spec('hermes_cli').origin)"
-> # then install the plugin into that interpreter, e.g.:
 > uv pip install --python /path/to/hermes/venv/bin/python caspase-hermes
 > ```
 >
-> In the `uv sync` demo flow above this is a non-issue — Hermes and Caspase
-> share the workspace venv, so `uv run hermes` sees the plugin automatically.
+> In the `uv sync` demo flow this is a non-issue — Hermes and Caspase share the
+> workspace venv, so `uv run hermes` sees the plugin automatically.
 
 The control plane runs as a separate service (FastAPI + Postgres). For
 local dev with Postgres instead of the in-process SQLite used by the
@@ -366,14 +404,21 @@ Customers can also pass a custom `Policy` object via `policy=...` on the watch c
 ## Operator CLI
 
 ```bash
-caspase fleet                                # registered agents + status
+caspase init --api-key sk-... --base-url https://...  # write ~/.caspase/config.toml once
+caspase fleet                                # active agents + status (hides terminal)
+caspase fleet --all                          # include terminated/zombie agents
+caspase fleet --status terminated            # only agents in one status
 caspase logs <agent_id>                      # tail events
 caspase kill <agent_id> --reason "loop"      # manual kill with worst-case latency banner
+caspase rm <agent_id>                        # delete one agent + its history (operator)
+caspase prune                                # bulk-delete terminated agents (operator)
 caspase grant <agent_id> \
     --symptoms loop --duration 1h \
     --reason "known flaky task"             # suppress one symptom temporarily
 caspase revoke <grant_id>                    # idempotent revoke
 ```
+
+`caspase fleet` hides terminal agents by default so the kill history doesn't pile up in the everyday view; `rm` and `prune` (both operator-only, with a confirmation prompt unless `--yes`) clear it out for good — deleting an agent cascades to its events, kill events, and grants.
 
 `caspase kill` prints the worst-case cooperative-kill latency up front so the operator has the right mental model before the wait starts. Exit code `6` means the kill was issued but the death certificate wasn't observed inside the CLI timeout — the kill event id is named in the failure message so it can be reconciled out of band.
 
@@ -415,7 +460,7 @@ caspase grant <agent_id> \
 | `CASPASE_DB_URL` | Control-plane Postgres DSN | Control plane only |
 | `CASPASE_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
 
-`.env` at the repo root is read automatically by the demo and CLI entry points (`.env.example` documents the keys; `.env` is git-ignored).
+`.env` at the repo root is read automatically by the demo and CLI entry points (`.env.example` documents the keys; `.env` is git-ignored). For a persistent, directory-independent setup, run `caspase init` once to write these into `~/.caspase/config.toml` instead — env vars still override the file when set, so CI and one-off shells keep working unchanged.
 
 ---
 
