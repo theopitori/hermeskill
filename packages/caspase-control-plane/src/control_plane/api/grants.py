@@ -208,7 +208,15 @@ async def revoke_grant(
 
 
 def _grant_out(row: ApoptosisGrant, *, now: datetime) -> GrantOut:
-    active = row.revoked_at is None and row.expires_at > now
+    # `expires_at` is a DateTime(timezone=True) column: tz-aware on Postgres,
+    # but SQLite (aiosqlite) drops the tzinfo on readback. The stored value is
+    # always UTC, so coerce a naive readback to UTC before comparing against the
+    # aware `now` — otherwise this raises on the SQLite path (naive vs aware).
+    # Mirrors the same fix in api/feedback.py.
+    expires_at = row.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    active = row.revoked_at is None and expires_at > now
     return GrantOut(
         id=row.id,
         agent_id=row.agent_id,
