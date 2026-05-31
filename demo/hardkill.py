@@ -113,6 +113,30 @@ async def run_hardkill_demo(*, quiet: bool = False) -> HardkillOutcome:
             record_step=lambda step, detail: state.record_shutdown_step(step, **detail),
         )
 
+        # The supervisor uses the 'spawn' start method: the child is a fresh
+        # interpreter that re-imports this module (``demo.hardkill``). Make the
+        # repo root importable in that child regardless of how the parent was
+        # launched — ``python -m demo`` puts cwd on sys.path, but the ``pytest``
+        # console-script (how CI runs the smoke test) does not, so the child
+        # would otherwise die with ``ModuleNotFoundError: No module named
+        # 'demo'`` and report ``trigger='completed'`` instead of a real kill.
+        #
+        # Two complementary guarantees, because ``multiprocessing.spawn`` both
+        # ships the parent's in-memory ``sys.path`` to the child *and* lets the
+        # child honour ``PYTHONPATH`` at interpreter startup:
+        #   1. insert into this process's ``sys.path`` so the captured copy the
+        #      child restores already contains the repo root, and
+        #   2. export ``PYTHONPATH`` so a fresh child resolves it even before
+        #      that restore runs.
+        _repo_root = str(Path(__file__).resolve().parents[1])
+        if _repo_root not in sys.path:
+            sys.path.insert(0, _repo_root)
+        _existing_pp = os.environ.get("PYTHONPATH", "")
+        if _repo_root not in _existing_pp.split(os.pathsep):
+            os.environ["PYTHONPATH"] = (
+                _repo_root + (os.pathsep + _existing_pp if _existing_pp else "")
+            )
+
         say(f"{cyan('▸')} spawning the wedged agent in a child process …")
         # Supervise off the event loop so the control plane stays responsive.
         result = await asyncio.to_thread(
