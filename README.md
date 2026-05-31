@@ -1,86 +1,39 @@
 # Caspase — an apoptosis protocol for AI agents
 
-Caspase watches every tool call and LLM turn of a running agent. The moment it
-sees a runaway loop, a budget breach, a wall-clock overrun, or an out-of-scope
-tool call, it **issues a cooperative shutdown and files an auditable death
-certificate**. Every kill is explainable — backed by a one-command offline demo
-(below) and by a [real Hermes + GPT-4o kill](docs/real-kill.md) you can reproduce.
+Install Caspase into your agent and it watches every tool call and LLM turn. The
+moment the agent loops, blows its budget, runs too long, or reaches for a tool
+it was never scoped to, Caspase **kills it and files an auditable death
+certificate** — a forensic record of exactly why it died.
 
-## See it in 60 seconds — no API key, no Postgres
+Works with **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** today
+(LangGraph adapter planned).
 
 ```bash
-uv sync
-uv run python -m demo
+# Install the plugin into Hermes' environment:
+uv tool install hermes-agent --with caspase-hermes==0.1.0a0
+
+# Enable it: add `caspase` to plugins.enabled in ~/.hermes/config.yaml
+# Point it at your control plane:
+export CASPASE_API_KEY=sk-...
+export CASPASE_BASE_URL=https://your-control-plane
 ```
 
-This boots an in-process control plane, drives the **real** detection engine
-into a loop, and files a death certificate — fully offline and deterministic:
+That's it. When an agent goes rogue, you get a death certificate:
 
 ```text
-  CASPASE  ·  offline apoptosis demo
-  policy: strict   scenario: loop
-  ────────────────────────────────────────────────────────────
-
-▸ booting in-process control plane (sqlite, no postgres) …
-  ✓ control plane up at http://localhost:8000
-▸ registering agent demo-rogue-coder …
-  ✓ agent e39b0772-…-6865eb2be8c0 registered
-
-  strict policy caps identical tool calls at 3 — the agent gets stuck
-  re-reading the same file and Caspase pulls the plug on the 3rd call.
-
-  the agent starts working, then misbehaves:
-
-  01  read_file(path='README.md')                  ok
-  02  read_file(path='README.md')                  ok
-  03  read_file(path='README.md')                  ☠ LOOP
-
-  ⚡ apoptosis: signature 'read_file|…' repeated 3x in last 3 actions (cap 3)
-  block directive → {'action': 'block', 'message': 'caspase apoptosis: … End the session.'}
-
-▸ posting death certificate …
-  ✓ kill_event #1 filed
-
-  ┌─ DEATH CERTIFICATE ───────────────────────────────────────
-  │ agent      e39b0772-…-6865eb2be8c0
-  │ trigger    auto / loop
-  │ reason     signature 'read_file|…' repeated 3x in last 3 actions (cap 3)
-  │ symptoms   1 terminal
-  │   • loop  signature 'read_file|…' repeated 3x …
-  │ shutdown   1 step(s)
-  │   • apoptosis_requested
-  └──────────────────────────────────────────────────────────
+┌─ DEATH CERTIFICATE ───────────────────────────────────
+│ agent      coding-agent-7
+│ trigger    auto / loop
+│ reason     read_file repeated 3x in last 3 actions (cap 3)
+│ symptoms   1 terminal  ·  loop
+│ shutdown   apoptosis_requested → block directive
+│ cost       $0.42  ·  18.2k in / 2.1k out
+└───────────────────────────────────────────────────────
 ```
 
-> **What this shows — and what it doesn't.** The detection, the block directive,
-> and the forensic certificate are all real. The demo drives the engine directly
-> (no separate agent process is spawned), and the kill path shown is the
-> *cooperative* one. See [What the kill actually does](#what-the-kill-actually-does)
-> for the honest mechanics.
-
-Try the other scenarios: `cost`, `scope`, `wall_clock`, `manualkill` (operator
-override via `caspase kill`), and `hardkill` (OS-level SIGKILL of a wedged
-process) — e.g. `uv run python -m demo --scenario manualkill` (or `--list`).
-Each is deterministic and offline.
-
-## See it kill a real Hermes agent
-
-The demo above proves the **engine** with no API key. To see that same engine
-kill a **real** [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-session driving GPT-4o — nothing scripted:
-
-> ```text
-> 10:39:36 tool      read_file
-> 10:39:36 symptom   loop (terminal) signature 'read_file|f969022d650c7957' repeated 3x in last 3 actions (cap 3)
-> 10:39:36 lifecycle session_end
-> ```
-> Caspase surfaced that verdict to Hermes as a tool error and ended the session
-> cooperatively — real model, real tokens, real cost.
-
-Full verbatim walkthrough (setup, prompt, Hermes output, `caspase fleet` /
-`caspase logs`): **[docs/real-kill.md](docs/real-kill.md)**. Tested against
-`hermes-agent==0.14.0`. To reproduce it yourself, see
-[Advanced: supervising a real runtime](#advanced-supervising-a-real-runtime-hermes).
+Proof it's real: a [Hermes + GPT-4o kill, verbatim](docs/real-kill.md) · or
+reproduce the engine offline with no API key via
+[`python -m demo`](docs/offline-demo.md).
 
 ## What the kill actually does
 
@@ -104,11 +57,8 @@ and they cancel a *task*, not an OS *process*. **L3 is the answer to exactly
 that case**, and it's the layer that makes "apoptosis" literally true. It's
 opt-in (the cooperative path stays the default for well-behaved agents), and on
 Windows `terminate()` is already a hard kill (there is no catchable SIGTERM), so
-the grace window applies on POSIX only. See it kill a real wedged process:
-
-```bash
-uv run python -m demo --scenario hardkill
-```
+the grace window applies on POSIX only. See it kill a real wedged process in the
+[`hardkill` scenario](docs/offline-demo.md#scenarios) of the offline demo.
 
 Whichever layer fires, the death certificate records the exact shutdown sequence
 (`supervisor_sigterm`, `supervisor_sigkill`, …) — the certificate is only as
@@ -162,11 +112,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## Advanced: supervising a real runtime (Hermes)
 
-> The one-command demo above already shows the engine end-to-end. This section
-> is for wiring Caspase into an actual agent runtime — today that's
-> [Hermes Agent](https://github.com/NousResearch/hermes-agent). It needs an LLM
-> provider and a little more setup; reach for it once the offline demo makes
-> sense.
+> The [offline engine demo](docs/offline-demo.md) shows the engine end-to-end
+> with no key. This section is for wiring Caspase into an actual agent runtime —
+> today that's [Hermes Agent](https://github.com/NousResearch/hermes-agent). It
+> needs an LLM provider and a little more setup.
 
 This walks you through a real Hermes session being killed by Caspase on the
 `loop` symptom. Two terminals, ~5 minutes of setup the first time, no
@@ -292,7 +241,7 @@ control plane's REST API.
 - **Manual kill:** while a session is running, in a third terminal:
   `uv run caspase kill <agent_id> --reason "operator demo"` — the next
   `pre_tool_call` blocks with `manual_kill`. See the whole operator→agent path
-  offline (no key) with `uv run python -m demo --scenario manualkill`.
+  offline (no key) in the [`manualkill` scenario](docs/offline-demo.md#scenarios).
 
 ### Stopping the control plane
 
@@ -548,8 +497,8 @@ The mechanism is deliberately small and honest, not "adaptive AI":
   numeric limits and can be suggested; a symptom like `tool_scope_violation`
   (an allowlist, not a number) is reported as stats only.
 
-See it run end-to-end — file kills, label them, read the report — with
-`python -m demo --scenario calibrate`. The heuristic itself is a pure function
+See it run end-to-end — file kills, label them, read the report — in the
+[`calibrate` scenario](docs/offline-demo.md#scenarios). The heuristic itself is a pure function
 over labeled kills ([`caspase.calibration`](packages/caspase-sdk/src/caspase/calibration.py)),
 so it's unit-tested without a database.
 
@@ -562,13 +511,15 @@ Caspase is honest about where it is.
 - ✅ **Hard-kill supervisor mode (Phase 2) — shipped.** The watched agent runs
   in a child process; the parent escalates SIGTERM → grace → SIGKILL, closing
   the cooperative-kill gap. See [`ProcessSupervisor`](packages/caspase-sdk/src/caspase/supervisor.py)
-  and `python -m demo --scenario hardkill`. Cooperative shutdown stays the
-  default; hard-kill is opt-in for untrusted or wedge-prone agents.
+  and the [`hardkill` scenario](docs/offline-demo.md#scenarios). Cooperative
+  shutdown stays the default; hard-kill is opt-in for untrusted or wedge-prone
+  agents.
 - ✅ **Feedback-driven calibration (Phase 4) — shipped.** The death-cert feedback
   labels feed an advisory, suggest-only calibration report — see
-  [Calibration](#calibration-tuning-from-feedback) below and
-  `python -m demo --scenario calibrate`. It suggests *looser* limits where
-  operators flag false positives; it never auto-applies and never tightens.
+  [Calibration](#calibration-tuning-from-feedback) below and the
+  [`calibrate` scenario](docs/offline-demo.md#scenarios). It suggests *looser*
+  limits where operators flag false positives; it never auto-applies and never
+  tightens.
 - ⬜ **LangGraph adapter (Phase 3) — planned.** A thin, opt-in adapter package
   to supervise any LangGraph graph or LangChain `Runnable` via a `watch()`
   wrapper, keeping the core SDK free of any LangChain dependency. Prototyped on
@@ -653,11 +604,6 @@ uv run pytest demo/tests -q                      # offline demo smoke test (no P
 uv run mypy packages/caspase-sdk/src packages/caspase-control-plane/src packages/caspase-hermes/src
 uv run ruff check .                              # lint
 ```
-
-**Regenerating the demo GIF.** The hero demo is recorded with
-[VHS](https://github.com/charmbracelet/vhs): `vhs docs/demo.tape` renders
-`docs/demo.gif` from `python -m demo`. It's fully deterministic and offline, so
-the recording runs unattended — no LLM key, no hardcoded ids.
 
 **Git workflow.** Never push to `main`. Create a `feat/...` or `fix/...` branch, push it, open a PR via `gh pr create`. Conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`) are preferred.
 

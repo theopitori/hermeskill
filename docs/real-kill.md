@@ -1,8 +1,8 @@
 # Killing a real Hermes agent (GPT-4o)
 
-The [`python -m demo`](../README.md#see-it-in-60-seconds--no-api-key-no-postgres)
-showpiece is deterministic and offline on purpose — it proves the *engine* with
-no API key. This page is the other half: Caspase killing a **real**
+The [`python -m demo`](offline-demo.md) showpiece is deterministic and offline
+on purpose — it proves the *engine* with no API key. This page is the other
+half: Caspase killing a **real**
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) session driving
 GPT-4o, with nothing scripted. Same engine, real runtime, real model spend.
 
