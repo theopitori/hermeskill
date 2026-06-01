@@ -8,10 +8,10 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "caspase",
-    "caspase-control-plane",
-    "caspase-hermes",
-    "caspase-workspace",
+    "hermeskill",
+    "hermeskill-control-plane",
+    "hermeskill-hermes",
+    "hermeskill-workspace",
 ]
 
 [[package]]
@@ -152,104 +152,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/7a/15e37d45e7f7c94facc1e9148c0e455e8f33c08f0b8a0b1deb2c5171771b/asyncpg-0.31.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:8df714dba348efcc162d2adf02d213e5fab1bd9f557e1305633e851a61814a7a", size = 3429426, upload-time = "2025-11-24T23:26:41.032Z" },
     { url = "https://files.pythonhosted.org/packages/13/d5/71437c5f6ae5f307828710efbe62163974e71237d5d46ebd2869ea052d10/asyncpg-0.31.0-cp314-cp314t-win32.whl", hash = "sha256:1b41f1afb1033f2b44f3234993b15096ddc9cd71b21a42dbd87fc6a57b43d65d", size = 614495, upload-time = "2025-11-24T23:26:42.659Z" },
     { url = "https://files.pythonhosted.org/packages/3c/d7/8fb3044eaef08a310acfe23dae9a8e2e07d305edc29a53497e52bc76eca7/asyncpg-0.31.0-cp314-cp314t-win_amd64.whl", hash = "sha256:bd4107bb7cdd0e9e65fae66a62afd3a249663b844fa34d479f6d5b3bef9c04c3", size = 706062, upload-time = "2025-11-24T23:26:44.086Z" },
-]
-
-[[package]]
-name = "caspase"
-version = "0.1.0a1"
-source = { editable = "packages/caspase-sdk" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "rich" },
-    { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pydantic", specifier = ">=2.8" },
-    { name = "rich", specifier = ">=13.7" },
-    { name = "typer", specifier = ">=0.12" },
-]
-
-[[package]]
-name = "caspase-control-plane"
-version = "0.1.0a1"
-source = { editable = "packages/caspase-control-plane" }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "caspase" },
-    { name = "fastapi" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "tenacity" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "asyncpg", specifier = ">=0.30" },
-    { name = "caspase", editable = "packages/caspase-sdk" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "pydantic", specifier = ">=2.8" },
-    { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.32" },
-    { name = "tenacity", specifier = ">=9.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-]
-
-[[package]]
-name = "caspase-hermes"
-version = "0.1.0a1"
-source = { editable = "packages/caspase-hermes" }
-dependencies = [
-    { name = "caspase" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "caspase", editable = "packages/caspase-sdk" }]
-
-[[package]]
-name = "caspase-workspace"
-version = "0.0.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "aiosqlite" },
-    { name = "caspase" },
-    { name = "caspase-control-plane" },
-    { name = "caspase-hermes" },
-    { name = "hermes-agent" },
-    { name = "httpx" },
-    { name = "hypothesis" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "aiosqlite", specifier = ">=0.20" },
-    { name = "caspase", editable = "packages/caspase-sdk" },
-    { name = "caspase-control-plane", editable = "packages/caspase-control-plane" },
-    { name = "caspase-hermes", editable = "packages/caspase-hermes" },
-    { name = "hermes-agent", specifier = ">=0.14" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "hypothesis", specifier = ">=6.112" },
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]
@@ -641,6 +543,104 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/78/ac/0535aab709872130fca6118256315164704d92a7427be116984e6e0e3997/hermes_agent-0.14.0.tar.gz", hash = "sha256:8f2c14125990b305eab4e29c23e180391805cb81b1d7b3da38447e29095eda4b", size = 13015983, upload-time = "2026-05-18T11:36:13.749Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/ae/5c7259fcc124b2753d4811527e21bebef066a209fbf1496ab47f544b9919/hermes_agent-0.14.0-py3-none-any.whl", hash = "sha256:67d79bd761f846a7e84b8b1be6fdf8bc38e789357cf7f4f474de165e9ce1739c", size = 9493591, upload-time = "2026-05-18T11:36:10.781Z" },
+]
+
+[[package]]
+name = "hermeskill"
+version = "0.1.0a1"
+source = { editable = "packages/hermeskill-sdk" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.8" },
+    { name = "rich", specifier = ">=13.7" },
+    { name = "typer", specifier = ">=0.12" },
+]
+
+[[package]]
+name = "hermeskill-control-plane"
+version = "0.1.0a1"
+source = { editable = "packages/hermeskill-control-plane" }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "fastapi" },
+    { name = "hermeskill" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "tenacity" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13" },
+    { name = "asyncpg", specifier = ">=0.30" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "hermeskill", editable = "packages/hermeskill-sdk" },
+    { name = "pydantic", specifier = ">=2.8" },
+    { name = "pydantic-settings", specifier = ">=2.5" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.32" },
+    { name = "tenacity", specifier = ">=9.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "hermeskill-hermes"
+version = "0.1.0a1"
+source = { editable = "packages/hermeskill-hermes" }
+dependencies = [
+    { name = "hermeskill" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "hermeskill", editable = "packages/hermeskill-sdk" }]
+
+[[package]]
+name = "hermeskill-workspace"
+version = "0.0.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "aiosqlite" },
+    { name = "hermes-agent" },
+    { name = "hermeskill" },
+    { name = "hermeskill-control-plane" },
+    { name = "hermeskill-hermes" },
+    { name = "httpx" },
+    { name = "hypothesis" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "aiosqlite", specifier = ">=0.20" },
+    { name = "hermes-agent", specifier = ">=0.14" },
+    { name = "hermeskill", editable = "packages/hermeskill-sdk" },
+    { name = "hermeskill-control-plane", editable = "packages/hermeskill-control-plane" },
+    { name = "hermeskill-hermes", editable = "packages/hermeskill-hermes" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "hypothesis", specifier = ">=6.112" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 """``python -m demo --scenario calibrate`` — feedback turns into a tuning hint.
 
-The other scenarios end at the death certificate. This one shows what Caspase
+The other scenarios end at the death certificate. This one shows what Hermeskill
 does with the *feedback* on those certificates. It:
 
   1. drives the real engine into a `loop` kill on several agents under the
@@ -58,28 +58,28 @@ async def run_calibrate_demo(*, quiet: bool = False) -> CalibrateOutcome:
         if not quiet:
             print(*args)
 
-    from caspase.apoptosis import build_kill_event_payload
-    from caspase.client import CaspaseClient
+    from hermeskill.apoptosis import build_kill_event_payload
+    from hermeskill.client import HermeskillClient
 
     say()
-    say(bold(cyan("  CASPASE")) + dim("  ·  feedback-driven calibration (Phase 4)"))
+    say(bold(cyan("  HERMESKILL")) + dim("  ·  feedback-driven calibration (Phase 4)"))
     say(dim(f"  policy: {_POLICY}   scenario: calibrate"))
     say(dim("  " + RULE))
     say()
     say(dim("  Every death certificate ships with a one-click feedback link. This"))
     say(dim("  scenario files several loop-kills, has an 'operator' label most of"))
-    say(dim("  them false-positive, then asks Caspase what that feedback implies."))
+    say(dim("  them false-positive, then asks Hermeskill what that feedback implies."))
     say()
 
     say(f"{cyan('▸')} booting in-process control plane {dim('(sqlite, no postgres)')} …")
-    _demo_db = Path(tempfile.gettempdir()) / "caspase-demo.db"
-    os.environ["CASPASE_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
+    _demo_db = Path(tempfile.gettempdir()) / "hermeskill-demo.db"
+    os.environ["HERMESKILL_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
     server, serve_task = await start_control_plane()
-    os.environ["CASPASE_API_KEY"] = _DEV_DEVELOPER_KEY
-    os.environ["CASPASE_BASE_URL"] = _BASE_URL
+    os.environ["HERMESKILL_API_KEY"] = _DEV_DEVELOPER_KEY
+    os.environ["HERMESKILL_BASE_URL"] = _BASE_URL
     say(f"  {green('✓')} control plane up at {dim(_BASE_URL)}")
 
-    client = CaspaseClient.from_config()
+    client = HermeskillClient.from_config()
     labeled = 0
     try:
         say(f"{cyan('▸')} filing {_N_KILLS} loop-kills and labelling them …")
@@ -140,9 +140,9 @@ async def run_calibrate_demo(*, quiet: bool = False) -> CalibrateOutcome:
                 "(60% of loop-kills were labeled false-positive)"
             )))
         say()
-        say(dim("  view it yourself:  ") + f"caspase calibrate {_POLICY}")
+        say(dim("  view it yourself:  ") + f"hermeskill calibrate {_POLICY}")
         say()
-        say(dim("  note: nothing was auto-applied. caspase suggests a looser limit"))
+        say(dim("  note: nothing was auto-applied. hermeskill suggests a looser limit"))
         say(dim("  for a human to set; it never tightens (it can't see kills that"))
         say(dim("  should have fired but didn't) and never edits the policy itself."))
         say()

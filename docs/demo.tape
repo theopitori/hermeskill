@@ -1,4 +1,4 @@
-# Caspase demo recording — the offline, one-command loop kill.
+# Hermeskill demo recording — the offline, one-command loop kill.
 #
 # Renders docs/demo.gif: `python -m demo` boots an in-process control plane,
 # drives the real engine into a loop, issues the block directive, and files a
@@ -29,7 +29,7 @@ Set TypingSpeed 45ms
 Set PlaybackSpeed 1.0
 
 # --- The whole story, in one command ---
-Type "# strict policy: 3 identical tool calls and Caspase pulls the plug"
+Type "# strict policy: 3 identical tool calls and Hermeskill pulls the plug"
 Enter
 Sleep 1500
 Type "uv run python -m demo"
