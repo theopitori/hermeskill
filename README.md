@@ -1,32 +1,45 @@
-# Caspase — an apoptosis protocol for AI agents
+# Hermeskill — an apoptosis protocol for AI agents
 
-Install Caspase into your agent and it watches every tool call and LLM turn. The
+Install Hermeskill into your agent and it watches every tool call and LLM turn. The
 moment the agent loops, blows its budget, runs too long, or reaches for a tool
-it was never scoped to, Caspase **kills it and files an auditable death
+it was never scoped to, Hermeskill **kills it and files an auditable death
 certificate** — a forensic record of exactly why it died.
 
-Works with **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** today
-(LangGraph adapter planned).
+Built for **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** — a
+drop-in plugin, no glue code.
 
 ## Quickstart (60 seconds, no control plane, no API key)
 
-Three steps. Supervision runs **in-process** — no server to stand up, no key to
-set, nothing to configure.
+Supervision runs **in-process** — no server to stand up, no key to set, nothing
+to configure.
 
 ```bash
-# 1. Install the plugin into Hermes' environment:
-uv tool install hermes-agent --with caspase-hermes
+# 1. Install Hermes with the Hermeskill plugin in its environment:
+uv tool install hermes-agent --with hermeskill-hermes
 
-# 2. Enable it (one shot — flips plugins.enabled in your Hermes config):
-caspase enable-hermes
+# 2. Install the Hermeskill CLI. The `--with hermes-agent` lets `enable-hermes`
+#    read and edit Hermes' config; the CLI's own commands stay independent.
+uv tool install hermeskill --with hermes-agent
 
-# 3. Run Hermes as usual. Caspase now watches every session:
+# 3. Put uv's tool directory on PATH (one-time), then restart your shell:
+uv tool update-shell
+
+# 4. Enable the plugin (one shot — flips plugins.enabled in your Hermes config):
+hermeskill enable-hermes
+
+# 5. Run Hermes as usual. Hermeskill now watches every session:
 hermes
 ```
 
+> Why two installs? `uv tool install hermes-agent` only exposes Hermes'
+> executables, not the `hermeskill` CLI that ships with the `hermeskill` dependency —
+> so the CLI needs its own `uv tool install`. (A leaner `uv tool install hermeskill`
+> without `--with hermes-agent` works for every command *except* `enable-hermes`,
+> which needs to import Hermes to locate its config.)
+
 When an agent goes rogue — loops, blows its budget, runs too long, reaches for
-an off-limits tool — Caspase kills it and **prints a death certificate to your
-terminal, saving a copy to `~/.caspase/kills/`**:
+an off-limits tool — Hermeskill kills it and **prints a death certificate to your
+terminal, saving a copy to `~/.hermeskill/kills/`**:
 
 ```text
 ┌─ DEATH CERTIFICATE ───────────────────────────────────
@@ -52,16 +65,16 @@ it off and you still get the kill and the certificate.
 
 ## What the kill actually does
 
-Caspase's termination is **cooperative by default**, escalating through three
+Hermeskill's termination is **cooperative by default**, escalating through three
 layers:
 
 - **L1 — block directive.** On a terminal symptom the framework adapter returns
-  `{"action": "block", "message": "caspase apoptosis: …"}` on every subsequent
+  `{"action": "block", "message": "hermeskill apoptosis: …"}` on every subsequent
   tool call. The agent is *asked* to stop; its loop winds down naturally.
-- **L2 — watchdog.** A per-agent daemon thread ([`apoptosis.py`](packages/caspase-sdk/src/caspase/apoptosis.py))
+- **L2 — watchdog.** A per-agent daemon thread ([`apoptosis.py`](packages/hermeskill-sdk/src/hermeskill/apoptosis.py))
   escalates after a grace window with `loop.call_soon_threadsafe(task.cancel)`,
   cancelling the agent's asyncio **task** from outside its event loop.
-- **L3 — process supervisor (opt-in).** [`ProcessSupervisor`](packages/caspase-sdk/src/caspase/supervisor.py)
+- **L3 — process supervisor (opt-in).** [`ProcessSupervisor`](packages/hermeskill-sdk/src/hermeskill/supervisor.py)
   runs the agent in a **child process** and escalates **SIGTERM → grace →
   SIGKILL** from the parent. Because it lives in a separate process, it kills an
   agent the agent cannot veto.
@@ -84,7 +97,7 @@ trustworthy as the claims around it.
 ## What you get
 
 ```
-caspase/
+hermeskill/
 ├── control plane     FastAPI service that stores agents, policies, kill events, grants
 ├── SDK               watcher state, symptom checks, death certificates, kill client
 ├── Hermes plugin     drop-in supervision for Hermes Agent
@@ -134,7 +147,7 @@ across every agent; operator-issued **manual kills**; and **grants** to
 pre-authorize a kill that would otherwise be wrong. Nothing below changes the
 kill itself — it makes the kills *visible and governable across a team*.
 
-This walks you through a real Hermes session being killed by Caspase on the
+This walks you through a real Hermes session being killed by Hermeskill on the
 `loop` symptom, with the operator loop wired up. Two terminals, ~5 minutes of
 setup the first time, no Postgres required (uses an in-process SQLite control
 plane).
@@ -142,13 +155,13 @@ plane).
 ### 0. Clone and install
 
 ```powershell
-git clone https://github.com/theopitori/caspase.git
-cd caspase
+git clone https://github.com/theopitori/hermeskill.git
+cd hermeskill
 uv sync
 ```
 
 `uv sync` pulls Hermes Agent (`hermes-agent>=0.14`) into the workspace venv
-alongside our packages. `caspase-hermes` is auto-discovered by Hermes via the
+alongside our packages. `hermeskill-hermes` is auto-discovered by Hermes via the
 `hermes_agent.plugins` entry-point group — no directory copy needed.
 
 ### 1. Authenticate Hermes to an LLM provider
@@ -156,21 +169,21 @@ alongside our packages. `caspase-hermes` is auto-discovered by Hermes via the
 If Hermes isn't already authed, point it at whatever provider you have
 (`uv run hermes auth add anthropic`, an `ANTHROPIC_API_KEY` env var, OpenRouter,
 etc.). See the [Hermes docs](https://github.com/NousResearch/hermes-agent) for
-the provider list — Caspase is provider-agnostic and watches the session
+the provider list — Hermeskill is provider-agnostic and watches the session
 regardless of which model is behind it.
 
-### 2. Enable the Caspase plugin
+### 2. Enable the Hermeskill plugin
 
-Hermes plugins are opt-in. Caspase is installed as a pip/entry-point plugin,
-so enable it by adding `caspase` to `plugins.enabled` in your Hermes config:
+Hermes plugins are opt-in. Hermeskill is installed as a pip/entry-point plugin,
+so enable it by adding `hermeskill` to `plugins.enabled` in your Hermes config:
 
 ```powershell
 uv run python -c @"
 from hermes_cli.config import load_config, save_config
 cfg = load_config()
 enabled = cfg.setdefault('plugins', {}).setdefault('enabled', [])
-if 'caspase' not in enabled:
-    enabled.append('caspase')
+if 'hermeskill' not in enabled:
+    enabled.append('hermeskill')
     save_config(cfg)
 print('plugins.enabled =', enabled)
 "@
@@ -182,28 +195,28 @@ Or edit the file by hand (`%LOCALAPPDATA%\hermes\config.yaml` on Windows,
 ```yaml
 plugins:
   enabled:
-    - caspase
+    - hermeskill
 ```
 
-> **Don't use `hermes plugins enable caspase`** — that command (and the
+> **Don't use `hermes plugins enable hermeskill`** — that command (and the
 > interactive `hermes plugins` UI) only manage *git-installed* plugins under
-> `~/.hermes/plugins/`. They don't see pip/entry-point plugins like Caspase
+> `~/.hermes/plugins/`. They don't see pip/entry-point plugins like Hermeskill
 > and will report "not installed or bundled." The runtime loader still honours
 > the `plugins.enabled` config key above for entry-point plugins, so that's
 > the supported enable path here.
 
-### 3. Configure Caspase
+### 3. Configure Hermeskill
 
 ```powershell
-$env:CASPASE_API_KEY  = "sk_dev_developer_local_only_do_not_ship"
-$env:CASPASE_BASE_URL = "http://localhost:8000"
-$env:CASPASE_POLICY   = "strict"   # tight caps so the kill fires fast
+$env:HERMESKILL_API_KEY  = "sk_dev_developer_local_only_do_not_ship"
+$env:HERMESKILL_BASE_URL = "http://localhost:8000"
+$env:HERMESKILL_POLICY   = "strict"   # tight caps so the kill fires fast
 ```
 
 ### 4. Start the control plane (separate terminal)
 
 ```powershell
-cd caspase
+cd hermeskill
 uv run python -m demo.coding_agent._run_control_plane
 ```
 
@@ -224,21 +237,21 @@ across calls so the loop check fires.)
 Expected behaviour:
 
 1. Hermes asks the LLM, the LLM picks `read_file` and calls it
-2. Caspase's `pre_tool_call` records each call
+2. Hermeskill's `pre_tool_call` records each call
 3. On the **3rd** identical call (under `strict`, `max_loop_repeats=3`), the
    loop check fires → `state.terminate_requested = True`
 4. The 4th `pre_tool_call` returns the block directive:
-   `{"action": "block", "message": "caspase apoptosis: loop ... End the session."}`
+   `{"action": "block", "message": "hermeskill apoptosis: loop ... End the session."}`
 5. Hermes surfaces that as the tool error to the LLM, which reads "end the
    session" and stops calling tools
 6. Hermes' session naturally ends → `on_session_end` fires
-7. Caspase posts the death certificate to the control plane
+7. Hermeskill posts the death certificate to the control plane
 
 ### 6. Inspect the kill
 
 ```powershell
-uv run caspase fleet
-uv run caspase logs <agent_id_from_above>
+uv run hermeskill fleet
+uv run hermeskill logs <agent_id_from_above>
 ```
 
 The death-cert URL printed in step 5 opens a one-click "this kill was
@@ -251,13 +264,13 @@ control plane's REST API.
 - **Scope violation:** keep `strict` policy (allowlist: `read_file`, `search`),
   prompt: *"Use the terminal tool to run `ls`"* → fires
   `tool_scope_violation` on the first call.
-- **Cost cap:** `$env:CASPASE_POLICY = "strict"` (cost cap = $2), prompt a
+- **Cost cap:** `$env:HERMESKILL_POLICY = "strict"` (cost cap = $2), prompt a
   long-context task → fires `token_runaway` once cumulative cost crosses
   the cap.
 - **Wall-clock:** also `strict` (5 min cap), prompt a long-running task →
   fires `wall_clock` after 5 minutes.
 - **Manual kill:** while a session is running, in a third terminal:
-  `uv run caspase kill <agent_id> --reason "operator demo"` — the next
+  `uv run hermeskill kill <agent_id> --reason "operator demo"` — the next
   `pre_tool_call` blocks with `manual_kill`. See the whole operator→agent path
   offline (no key) in the [`manualkill` scenario](docs/offline-demo.md#scenarios).
 
@@ -273,51 +286,51 @@ file is recreated next time you start it, so demo data is ephemeral.
 The repo quickstart uses `uv run hermes …`, which only works **inside this
 project** — `uv run` resolves against the workspace in your current directory,
 so running it from `~` or anywhere else fails (`uv trampoline failed to spawn`).
-For day-to-day use you want `hermes` and `caspase` on your PATH globally, so
+For day-to-day use you want `hermes` and `hermeskill` on your PATH globally, so
 they work from any directory. Two installs, because they live in two places:
 
 ```bash
 # 1. The plugin goes INTO Hermes' own environment so Hermes can discover it.
-#    `--with` adds caspase-hermes to the same tool venv as hermes-agent, so
+#    `--with` adds hermeskill-hermes to the same tool venv as hermes-agent, so
 #    entry-point discovery sees it.
-uv tool install hermes-agent --with caspase-hermes==0.1.0a1
+uv tool install hermes-agent --with hermeskill-hermes==0.1.0a1
 
-# 2. The `caspase` operator CLI is a separate global tool.
-uv tool install caspase==0.1.0a1
+# 2. The `hermeskill` operator CLI is a separate global tool.
+uv tool install hermeskill==0.1.0a1
 ```
 
 > **Note.** Pinning the exact version (rather than `--prerelease allow`) keeps the
 > dependency resolution on stable releases. Prefer `pipx`? `pipx install
-> hermes-agent` then `pipx inject hermes-agent caspase-hermes`, and `pipx
-> install caspase` for the CLI. A plain `pip install caspase-hermes` into your
+> hermes-agent` then `pipx inject hermes-agent hermeskill-hermes`, and `pipx
+> install hermeskill` for the CLI. A plain `pip install hermeskill-hermes` into your
 > shell's Python is **not** visible to a globally-installed Hermes — Hermes runs
 > from its own isolated venv, so the plugin must be installed into *that* venv
 > (what `--with` / `pipx inject` do for you).
 
 Then enable the plugin. For local-only supervision you're already done after
-this one command — skip the `caspase init` below unless you're wiring up a
+this one command — skip the `hermeskill init` below unless you're wiring up a
 control plane:
 
 ```bash
 # Enable the plugin (flips plugins.enabled in your Hermes config). Use this
 # instead of `hermes plugins enable`, which only manages git-installed plugins,
 # not pip/entry-point plugins like this one.
-caspase enable-hermes
+hermeskill enable-hermes
 
-# OPTIONAL — only if you run a control plane. Writes ~/.caspase/config.toml
+# OPTIONAL — only if you run a control plane. Writes ~/.hermeskill/config.toml
 # (chmod 0600 — it holds your API key) so you don't export env vars every shell.
-caspase init \
+hermeskill init \
     --api-key sk-... \
     --base-url https://your-control-plane.example.com \
     --agent-name my-coding-agent \
     --policy coding-default
 ```
 
-`caspase init` is the persistent alternative to the per-session
-`export CASPASE_API_KEY=…` dance. Resolution order is unchanged — explicit
+`hermeskill init` is the persistent alternative to the per-session
+`export HERMESKILL_API_KEY=…` dance. Resolution order is unchanged — explicit
 env vars still override the file when set — so CI can keep using env vars while
 your laptop reads the config file. Use an **operator-role** key if you want
-`caspase kill` / `rm` / `prune` to work (it covers the read commands too).
+`hermeskill kill` / `rm` / `prune` to work (it covers the read commands too).
 
 > **If the plugin silently won't load:** it's almost always installed in a
 > different environment than the one Hermes runs from. Confirm where Hermes
@@ -325,10 +338,10 @@ your laptop reads the config file. Use an **operator-role** key if you want
 >
 > ```bash
 > python -c "import importlib.util as u; print(u.find_spec('hermes_cli').origin)"
-> uv pip install --python /path/to/hermes/venv/bin/python caspase-hermes
+> uv pip install --python /path/to/hermes/venv/bin/python hermeskill-hermes
 > ```
 >
-> In the `uv sync` demo flow this is a non-issue — Hermes and Caspase share the
+> In the `uv sync` demo flow this is a non-issue — Hermes and Hermeskill share the
 > workspace venv, so `uv run hermes` sees the plugin automatically.
 
 The control plane runs as a separate service (FastAPI + Postgres). For
@@ -336,16 +349,16 @@ local dev with Postgres instead of the in-process SQLite used by the
 demo:
 
 ```bash
-uv run --package caspase-control-plane \
-    alembic -c packages/caspase-control-plane/alembic.ini upgrade head
-uv run --package caspase-control-plane caspase-control-plane
+uv run --package hermeskill-control-plane \
+    alembic -c packages/hermeskill-control-plane/alembic.ini upgrade head
+uv run --package hermeskill-control-plane hermeskill-control-plane
 ```
 
 `/healthz` returns 200 with `db: "ok"` once the pool is wired.
 
 ---
 
-## Symptoms Caspase watches for
+## Symptoms Hermeskill watches for
 
 | Symptom | What triggers it |
 |---|---|
@@ -353,10 +366,10 @@ uv run --package caspase-control-plane caspase-control-plane
 | `token_runaway` | Cumulative LLM cost exceeds the policy cost cap |
 | `wall_clock` | Session runs longer than the policy wall-clock cap |
 | `tool_scope_violation` | Agent calls a tool not in the policy allowlist |
-| `heartbeat_loss` | SDK stops posting heartbeats — operator can confirm via `caspase fleet` |
-| `manual_kill` | Operator issues `caspase kill <agent_id>` (bypasses grants) |
+| `heartbeat_loss` | SDK stops posting heartbeats — operator can confirm via `hermeskill fleet` |
+| `manual_kill` | Operator issues `hermeskill kill <agent_id>` (bypasses grants) |
 
-On any terminal symptom Caspase requests a cooperative shutdown via the framework adapter; the SDK posts a death certificate with the full symptom log and a feedback URL.
+On any terminal symptom Hermeskill requests a cooperative shutdown via the framework adapter; the SDK posts a death certificate with the full symptom log and a feedback URL.
 
 ---
 
@@ -379,31 +392,31 @@ Customers can also pass a custom `Policy` object via `policy=...` on the watch c
 ## Operator CLI
 
 ```bash
-caspase enable-hermes                        # add caspase to Hermes' plugins.enabled (one shot)
-caspase init --api-key sk-... --base-url https://...  # write ~/.caspase/config.toml once
-caspase fleet                                # active agents + status (hides terminal)
-caspase fleet --all                          # include terminated/zombie agents
-caspase fleet --status terminated            # only agents in one status
-caspase logs <agent_id>                      # tail events
-caspase kill <agent_id> --reason "loop"      # manual kill with worst-case latency banner
-caspase rm <agent_id>                        # delete one agent + its history (operator)
-caspase prune                                # bulk-delete terminated agents (operator)
-caspase grant <agent_id> \
+hermeskill enable-hermes                        # add hermeskill to Hermes' plugins.enabled (one shot)
+hermeskill init --api-key sk-... --base-url https://...  # write ~/.hermeskill/config.toml once
+hermeskill fleet                                # active agents + status (hides terminal)
+hermeskill fleet --all                          # include terminated/zombie agents
+hermeskill fleet --status terminated            # only agents in one status
+hermeskill logs <agent_id>                      # tail events
+hermeskill kill <agent_id> --reason "loop"      # manual kill with worst-case latency banner
+hermeskill rm <agent_id>                        # delete one agent + its history (operator)
+hermeskill prune                                # bulk-delete terminated agents (operator)
+hermeskill grant <agent_id> \
     --symptoms loop --duration 1h \
     --reason "known flaky task"             # suppress one symptom temporarily
-caspase revoke <grant_id>                    # idempotent revoke
+hermeskill revoke <grant_id>                    # idempotent revoke
 ```
 
-`caspase fleet` hides terminal agents by default so the kill history doesn't pile up in the everyday view; `rm` and `prune` (both operator-only, with a confirmation prompt unless `--yes`) clear it out for good — deleting an agent cascades to its events, kill events, and grants.
+`hermeskill fleet` hides terminal agents by default so the kill history doesn't pile up in the everyday view; `rm` and `prune` (both operator-only, with a confirmation prompt unless `--yes`) clear it out for good — deleting an agent cascades to its events, kill events, and grants.
 
-`caspase kill` prints the worst-case cooperative-kill latency up front so the operator has the right mental model before the wait starts. Exit code `6` means the kill was issued but the death certificate wasn't observed inside the CLI timeout — the kill event id is named in the failure message so it can be reconciled out of band.
+`hermeskill kill` prints the worst-case cooperative-kill latency up front so the operator has the right mental model before the wait starts. Exit code `6` means the kill was issued but the death certificate wasn't observed inside the CLI timeout — the kill event id is named in the failure message so it can be reconciled out of band.
 
 ---
 
 ## What's in a death certificate
 
 - **Symptom log** — every check that fired, with detail payloads.
-- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter returns Hermes' block directive (`{"action": "block", "message": "caspase apoptosis: <reason>"}`) on every subsequent tool call, halting further execution while the agent's loop winds down naturally.
+- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter returns Hermes' block directive (`{"action": "block", "message": "hermeskill apoptosis: <reason>"}`) on every subsequent tool call, halting further execution while the agent's loop winds down naturally.
 - **Cost summary** — input/output tokens per model, USD.
 - **Tool signature window** — the last 20 tool calls with their argument hashes (this is what the loop check reads).
 - **Feedback URL** — one-click "this kill was right / wrong" so verdicts compound over time. Token is single-use, expires, and the hash is symmetric on both ends.
@@ -412,10 +425,10 @@ caspase revoke <grant_id>                    # idempotent revoke
 
 ## Grants — apoptosis-proofing
 
-Sometimes a kill would be wrong. A known-flaky integration test legitimately loops. A long-running data export blows the wall-clock cap. Caspase lets the operator pre-authorize the exception:
+Sometimes a kill would be wrong. A known-flaky integration test legitimately loops. A long-running data export blows the wall-clock cap. Hermeskill lets the operator pre-authorize the exception:
 
 ```bash
-caspase grant <agent_id> \
+hermeskill grant <agent_id> \
     --symptoms wall_clock \
     --duration 4h \
     --reason "nightly dataset refresh"
@@ -427,20 +440,20 @@ caspase grant <agent_id> \
 
 ## Environment variables
 
-**None are required for the quickstart** — Caspase runs local-only with no env
+**None are required for the quickstart** — Hermeskill runs local-only with no env
 vars set. These configure the control-plane level-up.
 
 | Variable | Used for | When required |
 |---|---|---|
-| `CASPASE_API_KEY` | Agent → control plane authentication | **Optional.** Unset ⇒ local-only (kill + local cert, no archival) |
-| `CASPASE_BASE_URL` | Control plane URL | If not `http://localhost:8000` |
-| `CASPASE_AGENT_NAME` | Display name for the registered agent | Optional |
-| `CASPASE_POLICY` | Named policy override | Optional |
-| `CASPASE_LOCAL_CERT` | Print + save the death cert locally on a kill | Optional (default: on; set `0` to disable) |
-| `CASPASE_DB_URL` | Control-plane Postgres DSN | Control plane only |
-| `CASPASE_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
+| `HERMESKILL_API_KEY` | Agent → control plane authentication | **Optional.** Unset ⇒ local-only (kill + local cert, no archival) |
+| `HERMESKILL_BASE_URL` | Control plane URL | If not `http://localhost:8000` |
+| `HERMESKILL_AGENT_NAME` | Display name for the registered agent | Optional |
+| `HERMESKILL_POLICY` | Named policy override | Optional |
+| `HERMESKILL_LOCAL_CERT` | Print + save the death cert locally on a kill | Optional (default: on; set `0` to disable) |
+| `HERMESKILL_DB_URL` | Control-plane Postgres DSN | Control plane only |
+| `HERMESKILL_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
 
-`.env` at the repo root is read automatically by the demo and CLI entry points (`.env.example` documents the keys; `.env` is git-ignored). For a persistent, directory-independent setup, run `caspase init` once to write these into `~/.caspase/config.toml` instead — env vars still override the file when set, so CI and one-off shells keep working unchanged.
+`.env` at the repo root is read automatically by the demo and CLI entry points (`.env.example` documents the keys; `.env` is git-ignored). For a persistent, directory-independent setup, run `hermeskill init` once to write these into `~/.hermeskill/config.toml` instead — env vars still override the file when set, so CI and one-off shells keep working unchanged.
 
 ---
 
@@ -448,21 +461,21 @@ vars set. These configure the control-plane level-up.
 
 ```bash
 # control plane
-uv run --package caspase-control-plane caspase-control-plane         # serve
-uv run --package caspase-control-plane \
-    alembic -c packages/caspase-control-plane/alembic.ini upgrade head   # migrate
+uv run --package hermeskill-control-plane hermeskill-control-plane         # serve
+uv run --package hermeskill-control-plane \
+    alembic -c packages/hermeskill-control-plane/alembic.ini upgrade head   # migrate
 
 # operator CLI
-caspase fleet
-caspase logs <agent_id>
-caspase kill <agent_id> --reason "..."
-caspase grant <agent_id> --symptoms loop --duration 1h --reason "..."
-caspase revoke <grant_id>
-caspase calibrate <policy>                                          # tuning report
+hermeskill fleet
+hermeskill logs <agent_id>
+hermeskill kill <agent_id> --reason "..."
+hermeskill grant <agent_id> --symptoms loop --duration 1h --reason "..."
+hermeskill revoke <grant_id>
+hermeskill calibrate <policy>                                          # tuning report
 
 # tests
 uv run pytest                                                       # full suite
-uv run pytest packages/caspase-sdk/tests -q
+uv run pytest packages/hermeskill-sdk/tests -q
 uv run mypy packages
 uv run ruff check .
 ```
@@ -476,7 +489,7 @@ clicks it, they label the kill — `good_kill`, `false_positive`, `missed_kill`,
 or `other`. Those labels are the only signal here; nothing is inferred from the
 kill itself.
 
-`caspase calibrate <policy>` (and `GET /policies/{policy}/calibration`) turns
+`hermeskill calibrate <policy>` (and `GET /policies/{policy}/calibration`) turns
 those labels into an **advisory report**: per symptom, how many kills were
 labeled, the false-positive rate, and — only when the evidence warrants — a
 suggested looser limit for a human to apply.
@@ -508,18 +521,18 @@ The mechanism is deliberately small and honest, not "adaptive AI":
 
 See it run end-to-end — file kills, label them, read the report — in the
 [`calibrate` scenario](docs/offline-demo.md#scenarios). The heuristic itself is a pure function
-over labeled kills ([`caspase.calibration`](packages/caspase-sdk/src/caspase/calibration.py)),
+over labeled kills ([`hermeskill.calibration`](packages/hermeskill-sdk/src/hermeskill/calibration.py)),
 so it's unit-tested without a database.
 
 ---
 
 ## Roadmap
 
-Caspase is honest about where it is.
+Hermeskill is honest about where it is.
 
 - ✅ **Hard-kill supervisor mode (Phase 2) — shipped.** The watched agent runs
   in a child process; the parent escalates SIGTERM → grace → SIGKILL, closing
-  the cooperative-kill gap. See [`ProcessSupervisor`](packages/caspase-sdk/src/caspase/supervisor.py)
+  the cooperative-kill gap. See [`ProcessSupervisor`](packages/hermeskill-sdk/src/hermeskill/supervisor.py)
   and the [`hardkill` scenario](docs/offline-demo.md#scenarios). Cooperative
   shutdown stays the default; hard-kill is opt-in for untrusted or wedge-prone
   agents.
@@ -529,14 +542,8 @@ Caspase is honest about where it is.
   [`calibrate` scenario](docs/offline-demo.md#scenarios). It suggests *looser*
   limits where operators flag false positives; it never auto-applies and never
   tightens.
-- ⬜ **LangGraph adapter (Phase 3) — planned.** A thin, opt-in adapter package
-  to supervise any LangGraph graph or LangChain `Runnable` via a `watch()`
-  wrapper, keeping the core SDK free of any LangChain dependency. Prototyped on
-  a branch; Hermes is the supported runtime today.
-
-Phases 2 and 4 are shipped; Hermes is the supported runtime and the LangGraph
-adapter is next. Further directions are demand-driven (more adapters, richer
-policies) rather than scheduled.
+Hermes Agent is the supported runtime. Further directions are demand-driven
+(richer policies, more symptom checks) rather than scheduled.
 
 ---
 
@@ -544,52 +551,52 @@ policies) rather than scheduled.
 
 - **Agent payloads** — only metadata (tool name + argument hash, token counts, cost, model id) leaves the agent process. Tool arguments themselves are never sent; the loop detector compares hashes.
 - **Death certificate** — symptom log, shutdown sequence, cost summary, feedback URL. No conversation transcripts.
-- **No telemetry** — the SDK does not phone home. The only outbound HTTP from a watched agent is to the configured `CASPASE_BASE_URL`.
+- **No telemetry** — the SDK does not phone home. The only outbound HTTP from a watched agent is to the configured `HERMESKILL_BASE_URL`.
 
 ---
 
 ## Troubleshooting
 
-**`caspase: command not found` after `pip install caspase-hermes`**
-The CLI ships in the `caspase` distribution (a transitive dep). Install via `uv tool install caspase` or `pipx install caspase` to get the CLI on your PATH, then keep the Hermes plugin install as documented above.
+**`hermeskill: command not found` after `pip install hermeskill-hermes`**
+The CLI ships in the `hermeskill` distribution (a transitive dep). Install via `uv tool install hermeskill` or `pipx install hermeskill` to get the CLI on your PATH, then keep the Hermes plugin install as documented above.
 
-**Caspase never activates — no `registered` event, no logs**
-The plugin isn't being discovered. Two usual causes: (1) `caspase` isn't in
+**Hermeskill never activates — no `registered` event, no logs**
+The plugin isn't being discovered. Two usual causes: (1) `hermeskill` isn't in
 `plugins.enabled` in your Hermes config (see step 2 — and don't use `hermes
-plugins enable`, which only sees git-installed plugins); (2) `caspase-hermes`
+plugins enable`, which only sees git-installed plugins); (2) `hermeskill-hermes`
 is installed in a different environment than the one Hermes runs from. A global
 Hermes uses its own isolated venv — install the plugin into *that* interpreter
 (see the install note under [Production install](#production-install)).
 
 **Control plane returns 401 on every request**
-Double-check `CASPASE_API_KEY` against the row in `api_keys`. The middleware does a real hashed-key lookup — there is no stub key path.
+Double-check `HERMESKILL_API_KEY` against the row in `api_keys`. The middleware does a real hashed-key lookup — there is no stub key path.
 
-**`caspase kill` exits 6**
-"Kill issued but unconfirmed within Xs" — the directive was accepted but no death certificate arrived inside the CLI timeout. The kill-event id is printed; reconcile via `caspase logs <agent_id>` or by querying the control-plane API directly.
+**`hermeskill kill` exits 6**
+"Kill issued but unconfirmed within Xs" — the directive was accepted but no death certificate arrived inside the CLI timeout. The kill-event id is printed; reconcile via `hermeskill logs <agent_id>` or by querying the control-plane API directly.
 
 **`/healthz` returns 503 with `db_error`**
-The control plane probes the pool with `SELECT 1` on every health check. 503 means the DSN is wrong or Postgres isn't reachable. Check `CASPASE_DB_URL` and the Postgres server.
+The control plane probes the pool with `SELECT 1` on every health check. 503 means the DSN is wrong or Postgres isn't reachable. Check `HERMESKILL_DB_URL` and the Postgres server.
 
 **Agent doesn't self-terminate after the cooperative-kill flag is set**
 `task.cancel()` only fires at the next `await`. Agents wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) won't notice the flag until they return to the event loop. Mitigation: run the agent in its own subprocess so a parent process can `SIGTERM`/`SIGKILL` it on timeout.
 
-**`pytest` fails in `packages/caspase-control-plane/tests/`**
-The control-plane tests connect to a real Postgres via `CASPASE_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/caspase-sdk/tests packages/caspase-hermes/tests`.
+**`pytest` fails in `packages/hermeskill-control-plane/tests/`**
+The control-plane tests connect to a real Postgres via `HERMESKILL_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/hermeskill-sdk/tests packages/hermeskill-hermes/tests`.
 
 ---
 
 ## Repo layout
 
 ```
-caspase/
+hermeskill/
 ├── packages/
-│   ├── caspase-sdk/                  # SDK: watcher, checks, client, CLI
-│   ├── caspase-control-plane/        # FastAPI service + Alembic migrations
-│   └── caspase-hermes/               # Hermes Agent plugin
+│   ├── hermeskill-sdk/                  # SDK: watcher, checks, client, CLI
+│   ├── hermeskill-control-plane/        # FastAPI service + Alembic migrations
+│   └── hermeskill-hermes/               # Hermes Agent plugin
 ├── deploy/
 │   ├── setup.sh                      # Ubuntu VM bootstrap
 │   ├── dev-db-bootstrap.ps1          # Windows Postgres dev setup
-│   └── caspase-control-plane.service # systemd unit
+│   └── hermeskill-control-plane.service # systemd unit
 ├── scripts/                          # one-off verification scripts
 ├── .github/workflows/                # CI (ruff + mypy + pytest)
 ├── pyproject.toml                    # uv workspace root
@@ -604,19 +611,19 @@ caspase/
 ## Contributing
 
 ```bash
-git clone https://github.com/theopitori/caspase.git
-cd caspase
+git clone https://github.com/theopitori/hermeskill.git
+cd hermeskill
 uv sync                                          # installs all workspace packages
 
 uv run pytest -q                                 # full suite (control-plane tests need Postgres)
 uv run pytest demo/tests -q                      # offline demo smoke test (no Postgres)
-uv run mypy packages/caspase-sdk/src packages/caspase-control-plane/src packages/caspase-hermes/src
+uv run mypy packages/hermeskill-sdk/src packages/hermeskill-control-plane/src packages/hermeskill-hermes/src
 uv run ruff check .                              # lint
 ```
 
 **Git workflow.** Never push to `main`. Create a `feat/...` or `fix/...` branch, push it, open a PR via `gh pr create`. Conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`) are preferred.
 
-**Filing bugs.** Include the failing command, the agent id (if applicable), and the relevant slice of `caspase logs <agent_id>` output. For control-plane bugs, attach the `/healthz` body.
+**Filing bugs.** Include the failing command, the agent id (if applicable), and the relevant slice of `hermeskill logs <agent_id>` output. For control-plane bugs, attach the `/healthz` body.
 
 **Security issues.** See [SECURITY.md](SECURITY.md) — do not open a public issue.
 
@@ -624,4 +631,4 @@ uv run ruff check .                              # lint
 
 ## License
 
-[MIT](LICENSE) © 2026 Caspase Contributors
+[MIT](LICENSE) © 2026 Hermeskill Contributors

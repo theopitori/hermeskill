@@ -1,7 +1,7 @@
-"""``python -m demo`` — watch Caspase catch a runaway agent, in one command.
+"""``python -m demo`` — watch Hermeskill catch a runaway agent, in one command.
 
 Boots an in-process SQLite control plane (no Postgres), registers an agent,
-drives the **real** Caspase engine into a terminal symptom, shows the
+drives the **real** Hermeskill engine into a terminal symptom, shows the
 cooperative block directive it issues, and files an auditable death
 certificate — the whole detect → block → autopsy story in one terminal.
 
@@ -73,7 +73,7 @@ _AGENT_NAME = "demo-rogue-coder"
 
 _SCENARIO_BLURB = {
     "loop": "strict policy caps identical tool calls at 3 — the agent gets stuck "
-    "re-reading the same file and Caspase pulls the plug on the 3rd call.",
+    "re-reading the same file and Hermeskill pulls the plug on the 3rd call.",
     "cost": "strict policy caps spend at $2.00 — the agent burns expensive tokens "
     "until cumulative cost crosses the cap.",
     "scope": "strict policy allows only read_file + search — the agent reaches for "
@@ -83,10 +83,10 @@ _SCENARIO_BLURB = {
     "hardkill": "L3 supervisor: a CPU-wedged agent that ignores cooperative "
     "shutdown is force-killed (SIGKILL) in its child process.",
     "manualkill": "operator override: a well-behaved agent is terminated by hand "
-    "via `caspase kill` — it stops cooperatively at the next tool call (no symptom).",
+    "via `hermeskill kill` — it stops cooperatively at the next tool call (no symptom).",
     "calibrate": "feedback loop: files several loop-kills, labels most "
     "false-positive via the real feedback endpoint, then shows the advisory "
-    "'raise the loop cap' suggestion Caspase derives — suggest-only, never auto-applied.",
+    "'raise the loop cap' suggestion Hermeskill derives — suggest-only, never auto-applied.",
 }
 
 # Engine scenarios (run in-process via the watcher), the L3 hardkill scenario
@@ -122,11 +122,11 @@ async def run_offline_demo(
 
     # Import the SDK client lazily so a missing control-plane env can't break
     # `--list` / `--help`.
-    from caspase.apoptosis import build_death_certificate, build_kill_event_payload
-    from caspase.client import CaspaseClient
+    from hermeskill.apoptosis import build_death_certificate, build_kill_event_payload
+    from hermeskill.client import HermeskillClient
 
     say()
-    say(_bold(_cyan("  CASPASE")) + _dim("  ·  offline apoptosis demo"))
+    say(_bold(_cyan("  HERMESKILL")) + _dim("  ·  offline apoptosis demo"))
     say(_dim(f"  policy: strict   scenario: {scenario}"))
     say(_dim("  " + _RULE))
     say()
@@ -134,17 +134,17 @@ async def run_offline_demo(
     say(f"{_cyan('▸')} booting in-process control plane "
         f"{_dim('(sqlite, no postgres)')} …")
     # Force SQLite so the demo honours its "no Postgres" promise even when the
-    # surrounding shell/CI exports a CASPASE_DB_URL pointing at Postgres. This
+    # surrounding shell/CI exports a HERMESKILL_DB_URL pointing at Postgres. This
     # matches the path _bootstrap computes, so its stale-db cleanup still works.
-    _demo_db = Path(tempfile.gettempdir()) / "caspase-demo.db"
-    os.environ["CASPASE_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
+    _demo_db = Path(tempfile.gettempdir()) / "hermeskill-demo.db"
+    os.environ["HERMESKILL_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
     server, serve_task = await start_control_plane()
     say(f"  {_green('✓')} control plane up at {_dim(_BASE_URL)}")
 
-    os.environ["CASPASE_API_KEY"] = _DEV_DEVELOPER_KEY
-    os.environ["CASPASE_BASE_URL"] = _BASE_URL
+    os.environ["HERMESKILL_API_KEY"] = _DEV_DEVELOPER_KEY
+    os.environ["HERMESKILL_BASE_URL"] = _BASE_URL
 
-    client = CaspaseClient.from_config()
+    client = HermeskillClient.from_config()
     kill_event_id: int | None = None
     try:
         say(f"{_cyan('▸')} registering agent {_bold(_AGENT_NAME)} …")
@@ -179,7 +179,7 @@ async def run_offline_demo(
         say(_red("  ⚡ apoptosis: ") + terminal.reason)
         block = {
             "action": "block",
-            "message": f"caspase apoptosis: {terminal.reason} End the session.",
+            "message": f"hermeskill apoptosis: {terminal.reason} End the session.",
         }
         say(_dim("  block directive → ") + _yellow(str(block)))
         say()
@@ -209,7 +209,7 @@ async def run_offline_demo(
             say(_dim("  │   • ") + str(st.step))
         say(_dim(f"  └{'─' * 58}"))
         say()
-        say(_dim("  inspect it:  ") + f"caspase logs {agent_id}")
+        say(_dim("  inspect it:  ") + f"hermeskill logs {agent_id}")
         say()
         say(_dim("  note: the detection, block directive, and certificate above are"))
         say(_dim("  real. no agent process was force-killed — this is the cooperative"))
@@ -228,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     _prepare_console()
     parser = argparse.ArgumentParser(
         prog="python -m demo",
-        description="Watch Caspase catch a runaway agent and file its death "
+        description="Watch Hermeskill catch a runaway agent and file its death "
         "certificate — offline, one command.",
     )
     parser.add_argument(

@@ -1,6 +1,6 @@
 # Offline engine demo (`python -m demo`)
 
-This is the **reproducible half** of Caspase's proof. It runs the *real*
+This is the **reproducible half** of Hermeskill's proof. It runs the *real*
 detection engine — the same `WatcherState`, symptom checks, policies, and
 death-certificate builder the Hermes plugin uses — against a **scripted**
 agent, with no LLM key and no Postgres. It's deterministic, so it's what CI
@@ -23,7 +23,7 @@ This boots an in-process SQLite control plane, drives the engine into a loop,
 and files a death certificate:
 
 ```text
-  CASPASE  ·  offline apoptosis demo
+  HERMESKILL  ·  offline apoptosis demo
   policy: strict   scenario: loop
   ────────────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ and files a death certificate:
   ✓ agent e39b0772-…-6865eb2be8c0 registered
 
   strict policy caps identical tool calls at 3 — the agent gets stuck
-  re-reading the same file and Caspase pulls the plug on the 3rd call.
+  re-reading the same file and Hermeskill pulls the plug on the 3rd call.
 
   the agent starts working, then misbehaves:
 
@@ -42,7 +42,7 @@ and files a death certificate:
   03  read_file(path='README.md')                  ☠ LOOP
 
   ⚡ apoptosis: signature 'read_file|…' repeated 3x in last 3 actions (cap 3)
-  block directive → {'action': 'block', 'message': 'caspase apoptosis: … End the session.'}
+  block directive → {'action': 'block', 'message': 'hermeskill apoptosis: … End the session.'}
 
 ▸ posting death certificate …
   ✓ kill_event #1 filed
@@ -68,7 +68,7 @@ Each is deterministic and offline. Run with `--scenario <name>` (or `--list`):
 | `cost` | Cumulative LLM cost crosses the policy cap (`token_runaway`) |
 | `scope` | Agent calls a tool outside the policy allowlist (`tool_scope_violation`) |
 | `wall_clock` | Session exceeds the policy wall-clock cap |
-| `manualkill` | Operator override via `caspase kill` — the whole operator→agent path, offline |
+| `manualkill` | Operator override via `hermeskill kill` — the whole operator→agent path, offline |
 | `hardkill` | **L3 process supervisor** sends a real SIGTERM→SIGKILL to a wedged child process the cooperative path provably can't touch |
 
 ```bash

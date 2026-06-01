@@ -29,7 +29,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Mypy
-        run: uv run mypy packages/caspase-sdk/src packages/caspase-control-plane/src packages/caspase-hermes/src
+        run: uv run mypy packages/hermeskill-sdk/src packages/hermeskill-control-plane/src packages/hermeskill-hermes/src
 
   test:
     name: pytest
@@ -38,21 +38,21 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: caspase
-          POSTGRES_PASSWORD: caspase
-          POSTGRES_DB: caspase
+          POSTGRES_USER: hermeskill
+          POSTGRES_PASSWORD: hermeskill
+          POSTGRES_DB: hermeskill
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U caspase"
+          --health-cmd "pg_isready -U hermeskill"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
-      CASPASE_DB_URL: postgresql+asyncpg://caspase:caspase@localhost:5432/caspase
-      CASPASE_API_KEY: sk_dev_developer_local_only_do_not_ship
-      CASPASE_OPERATOR_KEY: sk_dev_operator_local_only_do_not_ship
-      CASPASE_BASE_URL: http://localhost:8000
+      HERMESKILL_DB_URL: postgresql+asyncpg://hermeskill:hermeskill@localhost:5432/hermeskill
+      HERMESKILL_API_KEY: sk_dev_developer_local_only_do_not_ship
+      HERMESKILL_OPERATOR_KEY: sk_dev_operator_local_only_do_not_ship
+      HERMESKILL_BASE_URL: http://localhost:8000
     steps:
       - uses: actions/checkout@v4
 
@@ -66,8 +66,8 @@ jobs:
 
       - name: Run Alembic migrations
         run: |
-          uv run --package caspase-control-plane \
-            alembic -c packages/caspase-control-plane/alembic.ini upgrade head
+          uv run --package hermeskill-control-plane \
+            alembic -c packages/hermeskill-control-plane/alembic.ini upgrade head
 
       - name: Pytest
         run: uv run pytest -q
@@ -75,7 +75,7 @@ jobs:
   demo-smoke:
     name: demo showpiece (offline)
     runs-on: ubuntu-latest
-    # Intentionally NO postgres service and NO CASPASE_DB_URL: the demo boots
+    # Intentionally NO postgres service and NO HERMESKILL_DB_URL: the demo boots
     # its own in-process SQLite control plane and must run with zero external
     # state. Kept out of the main `pytest` job so it never shares a process (and
     # port 8000) with the Postgres-backed control-plane tests.
@@ -108,8 +108,8 @@ jobs:
           enable-cache: true
 
       - name: Install the SDK
-        run: uv sync --package caspase
+        run: uv sync --package hermeskill
 
       - name: Bare import smoke test
         run: |
-          uv run --package caspase python -c "import caspase; from caspase import CaspaseTerminated, CaspaseError; print(caspase.__version__)"
+          uv run --package hermeskill python -c "import hermeskill; from hermeskill import HermeskillTerminated, HermeskillError; print(hermeskill.__version__)"

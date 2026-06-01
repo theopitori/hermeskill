@@ -1,6 +1,6 @@
 """Boot an in-process control plane backed by SQLite for the demo.
 
-Sets CASPASE_DB_URL *before* any control_plane import so the SQLAlchemy
+Sets HERMESKILL_DB_URL *before* any control_plane import so the SQLAlchemy
 engine uses SQLite + aiosqlite instead of Postgres. Creates the schema
 via Base.metadata.create_all() (skipping Alembic to avoid the
 postgresql_where= partial-index issue in migration 0004). Seeds the dev
@@ -36,12 +36,12 @@ def _sha256(raw: str) -> str:
 async def start_control_plane() -> tuple[uvicorn.Server, asyncio.Task[Any]]:
     """Start the in-process control plane; return (server, task) for cleanup.
 
-    Call this ONCE before setting CASPASE_API_KEY / CASPASE_BASE_URL so
-    those env vars are ready when the SDK's CaspaseClient is constructed.
+    Call this ONCE before setting HERMESKILL_API_KEY / HERMESKILL_BASE_URL so
+    those env vars are ready when the SDK's HermeskillClient is constructed.
     """
-    db_path = Path(tempfile.gettempdir()) / "caspase-demo.db"
+    db_path = Path(tempfile.gettempdir()) / "hermeskill-demo.db"
     # Must be set before any control_plane.* import so Settings() picks it up.
-    os.environ.setdefault("CASPASE_DB_URL", f"sqlite+aiosqlite:///{db_path}")
+    os.environ.setdefault("HERMESKILL_DB_URL", f"sqlite+aiosqlite:///{db_path}")
 
     # Lazy-import after the env var is in place.
     from sqlalchemy import JSON, text

@@ -24,7 +24,7 @@ import sys
 
 from demo.coding_agent._bootstrap import start_control_plane
 
-logger = logging.getLogger("caspase.demo.control_plane")
+logger = logging.getLogger("hermeskill.demo.control_plane")
 
 
 async def _main() -> int:

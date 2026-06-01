@@ -1,0 +1,22 @@
+[Unit]
+Description=Hermeskill Control Plane (FastAPI)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=hermeskill
+Group=hermeskill
+WorkingDirectory=/opt/hermeskill
+ExecStart=/opt/hermeskill/.venv/bin/hermeskill-control-plane
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/hermeskill
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

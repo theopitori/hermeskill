@@ -1,13 +1,13 @@
 """``python -m demo --scenario manualkill`` — the operator pulls the plug (M4).
 
-The other scenarios show Caspase deciding *on its own* that an agent has gone
+The other scenarios show Hermeskill deciding *on its own* that an agent has gone
 rogue (loop, cost, wall-clock, scope). This one shows the **human override**:
-an operator runs ``caspase kill <agent_id>`` against a perfectly well-behaved
+an operator runs ``hermeskill kill <agent_id>`` against a perfectly well-behaved
 agent and it dies cooperatively at the next tool boundary.
 
 It exercises the real two-sided M4 path end-to-end, offline:
 
-  operator    POST /agents/{id}/terminate          (== ``caspase kill``)
+  operator    POST /agents/{id}/terminate          (== ``hermeskill kill``)
                        │  creates an INITIATED kill_event
                        ▼
   agent SDK   GET  /kills/pending                   (the KillPendingPoller)
@@ -64,31 +64,31 @@ async def run_manualkill_demo(*, quiet: bool = False) -> ManualKillOutcome:
         if not quiet:
             print(*args)
 
-    from caspase.apoptosis import build_death_certificate, build_kill_event_payload
-    from caspase.client import CaspaseClient
-    from caspase.policies import resolve_policy
-    from caspase.watcher import WatcherState
+    from hermeskill.apoptosis import build_death_certificate, build_kill_event_payload
+    from hermeskill.client import HermeskillClient
+    from hermeskill.policies import resolve_policy
+    from hermeskill.watcher import WatcherState
 
     say()
-    say(bold(cyan("  CASPASE")) + dim("  ·  operator manual kill (M4)"))
+    say(bold(cyan("  HERMESKILL")) + dim("  ·  operator manual kill (M4)"))
     say(dim("  policy: strict   scenario: manualkill"))
     say(dim("  " + RULE))
     say()
     say(dim("  Not every kill is automatic. Sometimes a human sees something the"))
-    say(dim("  symptom checks can't — and needs an off switch. `caspase kill` is"))
+    say(dim("  symptom checks can't — and needs an off switch. `hermeskill kill` is"))
     say(dim("  that switch: the agent keeps working until the operator decides, then"))
     say(dim("  stops cooperatively at its next tool call. No symptom required."))
     say()
 
     say(f"{cyan('▸')} booting in-process control plane {dim('(sqlite, no postgres)')} …")
-    _demo_db = Path(tempfile.gettempdir()) / "caspase-demo.db"
-    os.environ["CASPASE_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
+    _demo_db = Path(tempfile.gettempdir()) / "hermeskill-demo.db"
+    os.environ["HERMESKILL_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
     server, serve_task = await start_control_plane()
-    os.environ["CASPASE_API_KEY"] = _DEV_DEVELOPER_KEY
-    os.environ["CASPASE_BASE_URL"] = _BASE_URL
+    os.environ["HERMESKILL_API_KEY"] = _DEV_DEVELOPER_KEY
+    os.environ["HERMESKILL_BASE_URL"] = _BASE_URL
     say(f"  {green('✓')} control plane up at {dim(_BASE_URL)}")
 
-    client = CaspaseClient.from_config()
+    client = HermeskillClient.from_config()
     kill_event_id: int | None = None
     try:
         reg = await client.register_agent(name=_AGENT_NAME, policy_name="strict")
@@ -105,13 +105,13 @@ async def run_manualkill_demo(*, quiet: bool = False) -> ManualKillOutcome:
             f"{dim('(read_file → ok, no symptom)')}")
         say()
 
-        # --- operator side: `caspase kill <agent_id> --reason ...` --------------
-        # Manual kill is operator-only — `caspase kill` uses an operator-role
+        # --- operator side: `hermeskill kill <agent_id> --reason ...` --------------
+        # Manual kill is operator-only — `hermeskill kill` uses an operator-role
         # key, distinct from the agent's developer key. Mirror that here with a
         # second client so the role boundary is exercised, not bypassed.
-        say(f"{cyan('▸')} operator runs {bold('caspase kill ' + str(agent_id))}")
+        say(f"{cyan('▸')} operator runs {bold('hermeskill kill ' + str(agent_id))}")
         say(dim(f"  reason: {_OPERATOR_REASON}"))
-        async with CaspaseClient(
+        async with HermeskillClient(
             base_url=_BASE_URL, api_key=_DEV_OPERATOR_KEY
         ) as operator:
             await operator.terminate_agent(agent_id, reason=_OPERATOR_REASON)
@@ -120,7 +120,7 @@ async def run_manualkill_demo(*, quiet: bool = False) -> ManualKillOutcome:
         say()
 
         # --- agent side: the KillPendingPoller delivers it ----------------------
-        # Mirrors caspase.watcher.KillPendingPoller._tick exactly: poll the
+        # Mirrors hermeskill.watcher.KillPendingPoller._tick exactly: poll the
         # batch endpoint, then request_termination with the operator context so
         # the cert is stamped MANUAL with the operator's reason.
         say(f"{cyan('▸')} agent SDK polls {bold('GET /kills/pending')} …")
@@ -141,7 +141,7 @@ async def run_manualkill_demo(*, quiet: bool = False) -> ManualKillOutcome:
         # --- the cooperative block at the next tool boundary --------------------
         block = {
             "action": "block",
-            "message": f"caspase apoptosis: {state.terminate_reason} End the session.",
+            "message": f"hermeskill apoptosis: {state.terminate_reason} End the session.",
         }
         say(red("  ⚡ apoptosis: ") + (state.terminate_reason or ""))
         say(dim("  next pre_tool_call → ") + yellow(str(block)))
@@ -167,7 +167,7 @@ async def run_manualkill_demo(*, quiet: bool = False) -> ManualKillOutcome:
             say(dim("  │   • ") + str(st.step))
         say(dim(f"  └{'─' * 58}"))
         say()
-        say(dim("  inspect it:  ") + f"caspase logs {agent_id}")
+        say(dim("  inspect it:  ") + f"hermeskill logs {agent_id}")
         say()
         say(dim("  note: manual kill is the cooperative path — the agent is asked to"))
         say(dim("  stop and does, at its next tool boundary. For an agent that refuses"))

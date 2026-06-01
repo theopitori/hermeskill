@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.DEBUG)
 
-DB_PATH = Path("C:/Temp/caspase-test.db")
+DB_PATH = Path("C:/Temp/hermeskill-test.db")
 CUSTOMER_ID = "11111111-1111-4111-8111-111111111111"
 API_KEY_ID = "22222222-2222-4222-8222-222222222222"
 DEV_KEY = "sk_dev_developer_local_only_do_not_ship"
@@ -20,7 +20,7 @@ DEV_KEY = "sk_dev_developer_local_only_do_not_ship"
 
 async def main() -> None:
     DB_PATH.unlink(missing_ok=True)
-    os.environ["CASPASE_DB_URL"] = f"sqlite+aiosqlite:///{DB_PATH}"
+    os.environ["HERMESKILL_DB_URL"] = f"sqlite+aiosqlite:///{DB_PATH}"
 
     import uuid as _uuid_module
 
