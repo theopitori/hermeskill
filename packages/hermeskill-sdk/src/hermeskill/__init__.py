@@ -1,9 +1,9 @@
 """Hermeskill SDK — apoptosis protocol core for AI agent supervision.
 
-Framework-agnostic core: WatcherState, symptom checks, death certificates,
-kill-event client, operator CLI. Install a framework adapter on top:
+Core SDK: WatcherState, symptom checks, death certificates, kill-event client,
+operator CLI. Install the Hermes plugin on top:
 
-    pip install hermeskill-hermes         # Hermes Agent plugin (recommended)
+    pip install hermeskill-hermes         # Hermes Agent plugin
 
 The bare `hermeskill` package imports with no third-party agent-framework
 dependencies.
@@ -12,7 +12,7 @@ Public exceptions:
 
     from hermeskill import HermeskillTerminated
 
-    # Raised by framework adapters and `checkpoint()` when the agent is
+    # Raised by the Hermes plugin and `checkpoint()` when the agent is
     # killed by Hermeskill. Catch at your top-level run loop if you need
     # cleanup before exit.
 

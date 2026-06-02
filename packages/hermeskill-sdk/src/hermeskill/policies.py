@@ -1,10 +1,11 @@
 """Built-in supervision policies.
 
-Three defaults ship with the SDK and are available by name to `watch()`:
+Three defaults ship with the SDK and are selected by name — set
+`HERMESKILL_POLICY` (or `policy=` in `~/.hermeskill/config.toml`):
 
-    watch(graph, name="...", policy="strict")          # least permissive
-    watch(graph, name="...", policy="coding-default")  # everyday coding agents
-    watch(graph, name="...", policy="permissive")      # loose, for exploration
+    strict           # least permissive — tight caps and allowlist
+    coding-default   # everyday coding agents
+    permissive       # loose, for exploration
 
 Custom policies (load-from-YAML / server-side CRUD) land in M5 alongside
 the grant system. For now, the SDK is the authoritative source of policy
