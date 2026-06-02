@@ -72,30 +72,6 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
-  demo-smoke:
-    name: demo showpiece (offline)
-    runs-on: ubuntu-latest
-    # Intentionally NO postgres service and NO HERMESKILL_DB_URL: the demo boots
-    # its own in-process SQLite control plane and must run with zero external
-    # state. Kept out of the main `pytest` job so it never shares a process (and
-    # port 8000) with the Postgres-backed control-plane tests.
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
-
-      - name: Install dependencies
-        run: uv sync --all-packages
-
-      - name: Demo smoke test (every scenario kills + files a cert)
-        run: uv run pytest demo/tests -q
-
-      - name: Run the showpiece end-to-end
-        run: uv run python -m demo
-
   import-smoke:
     name: bare import smoke test
     runs-on: ubuntu-latest

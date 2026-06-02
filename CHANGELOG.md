@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Removed the offline demo** — the `demo/` package (`python -m demo` and its scenarios), its smoke tests, the `demo.tape`/GIF tooling, and the SQLite "Try it" walkthrough are gone. They were scaffolding to exercise the engine without a real agent and were never meant to ship; Hermeskill's value is supervising a real Hermes session. The control-plane section now documents the real Postgres boot, and [docs/real-kill.md](docs/real-kill.md) is the verbatim proof. The `python -m demo…` reference under 0.1.0a0 below no longer applies.
+
 ## 0.1.0a1 (2026-05-31)
 
 Zero-config, no-control-plane supervision — the death certificate now lands on every kill, even with no API key and no backend running.
