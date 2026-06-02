@@ -8,7 +8,7 @@ module renders that certificate to a human-readable box and saves it under
 control plane configured (the zero-config path).
 
 Plain text by design: the output goes to a log/stderr and to a file, where ANSI
-escapes would be noise. The box-drawing glyphs match the offline demo's layout.
+escapes would be noise. The box-drawing glyphs render a compact cert layout.
 """
 
 from __future__ import annotations

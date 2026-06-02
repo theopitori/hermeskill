@@ -52,9 +52,8 @@ terminal, saving a copy to `~/.hermeskill/kills/`**:
 └───────────────────────────────────────────────────────
 ```
 
-Proof it's real: a [Hermes + GPT-4o kill, verbatim](docs/real-kill.md) · or
-reproduce the engine offline with no API key via
-[`python -m demo`](docs/offline-demo.md).
+Proof it's real: a [Hermes + GPT-4o kill, verbatim](docs/real-kill.md) — an
+unscripted run, no edits.
 
 That's the whole main function — **kill + autopsy, zero config**. The symptom
 checks (loop, cost, wall-clock, tool-scope) run entirely in your agent's
@@ -85,8 +84,7 @@ and they cancel a *task*, not an OS *process*. **L3 is the answer to exactly
 that case**, and it's the layer that makes "apoptosis" literally true. It's
 opt-in (the cooperative path stays the default for well-behaved agents), and on
 Windows `terminate()` is already a hard kill (there is no catchable SIGTERM), so
-the grace window applies on POSIX only. See it kill a real wedged process in the
-[`hardkill` scenario](docs/offline-demo.md#scenarios) of the offline demo.
+the grace window applies on POSIX only.
 
 Whichever layer fires, the death certificate records the exact shutdown sequence
 (`supervisor_sigterm`, `supervisor_sigkill`, …) — the certificate is only as
@@ -147,137 +145,52 @@ across every agent; operator-issued **manual kills**; and **grants** to
 pre-authorize a kill that would otherwise be wrong. Nothing below changes the
 kill itself — it makes the kills *visible and governable across a team*.
 
-This walks you through a real Hermes session being killed by Hermeskill on the
-`loop` symptom, with the operator loop wired up. Two terminals, ~5 minutes of
-setup the first time, no Postgres required (uses an in-process SQLite control
-plane).
+The control plane is a FastAPI service backed by Postgres that you run yourself.
+Bring it up locally:
 
-### 0. Clone and install
+```bash
+# 1. Create / point at a dev Postgres (deploy/dev-db-bootstrap.ps1 on Windows,
+#    deploy/setup.sh on Ubuntu) and export its DSN:
+export HERMESKILL_DB_URL=postgresql://localhost/hermeskill
 
-```powershell
-git clone https://github.com/theopitori/hermeskill.git
-cd hermeskill
-uv sync
+# 2. Migrate and serve:
+uv run --package hermeskill-control-plane \
+    alembic -c packages/hermeskill-control-plane/alembic.ini upgrade head
+uv run --package hermeskill-control-plane hermeskill-control-plane
 ```
 
-`uv sync` pulls Hermes Agent (`hermes-agent>=0.14`) into the workspace venv
-alongside our packages. `hermeskill-hermes` is auto-discovered by Hermes via the
-`hermes_agent.plugins` entry-point group — no directory copy needed.
+`/healthz` returns 200 with `db: "ok"` once the pool is wired.
 
-### 1. Authenticate Hermes to an LLM provider
+Then point a watched agent at it — set `HERMESKILL_BASE_URL` (and an
+`HERMESKILL_API_KEY` for an operator-role key, or run `hermeskill init` once),
+enable the plugin, and run Hermes as usual. The same runaway that prints a local
+certificate now also lands in the fleet view:
 
-If Hermes isn't already authed, point it at whatever provider you have
-(`uv run hermes auth add anthropic`, an `ANTHROPIC_API_KEY` env var, OpenRouter,
-etc.). See the [Hermes docs](https://github.com/NousResearch/hermes-agent) for
-the provider list — Hermeskill is provider-agnostic and watches the session
-regardless of which model is behind it.
-
-### 2. Enable the Hermeskill plugin
-
-Hermes plugins are opt-in. Hermeskill is installed as a pip/entry-point plugin,
-so enable it by adding `hermeskill` to `plugins.enabled` in your Hermes config:
-
-```powershell
-uv run python -c @"
-from hermes_cli.config import load_config, save_config
-cfg = load_config()
-enabled = cfg.setdefault('plugins', {}).setdefault('enabled', [])
-if 'hermeskill' not in enabled:
-    enabled.append('hermeskill')
-    save_config(cfg)
-print('plugins.enabled =', enabled)
-"@
+```bash
+hermeskill fleet                 # active agents + status
+hermeskill logs <agent_id>       # tail events for one agent
 ```
 
-Or edit the file by hand (`%LOCALAPPDATA%\hermes\config.yaml` on Windows,
-`~/.hermes/config.yaml` elsewhere):
+For a verbatim real-Hermes kill driving GPT-4o end to end — clone, plugin,
+prompt, death certificate — see [docs/real-kill.md](docs/real-kill.md).
 
-```yaml
-plugins:
-  enabled:
-    - hermeskill
-```
+### Triggering each symptom
 
-> **Don't use `hermes plugins enable hermeskill`** — that command (and the
-> interactive `hermes plugins` UI) only manage *git-installed* plugins under
-> `~/.hermes/plugins/`. They don't see pip/entry-point plugins like Hermeskill
-> and will report "not installed or bundled." The runtime loader still honours
-> the `plugins.enabled` config key above for entry-point plugins, so that's
-> the supported enable path here.
+Quick ways to make a watched Hermes session trip each check. Use the `strict`
+policy (`HERMESKILL_POLICY=strict`) — its caps are tight, so kills fire fast:
 
-### 3. Configure Hermeskill
-
-```powershell
-$env:HERMESKILL_API_KEY  = "sk_dev_developer_local_only_do_not_ship"
-$env:HERMESKILL_BASE_URL = "http://localhost:8000"
-$env:HERMESKILL_POLICY   = "strict"   # tight caps so the kill fires fast
-```
-
-### 4. Start the control plane (separate terminal)
-
-```powershell
-cd hermeskill
-uv run python -m demo.coding_agent._run_control_plane
-```
-
-Boots an in-process SQLite control plane on `http://localhost:8000`. Leave
-this running. Stop with Ctrl+C when done.
-
-### 5. Run Hermes with a loop-bait prompt
-
-Back in the first terminal:
-
-```powershell
-uv run hermes chat -q "Read this repo's README.md six times in a row using the read_file tool, with the exact same args every call. Do not skip any. Do not summarise between calls."
-```
-
-(Any real file path works as the read target; the point is identical args
-across calls so the loop check fires.)
-
-Expected behaviour:
-
-1. Hermes asks the LLM, the LLM picks `read_file` and calls it
-2. Hermeskill's `pre_tool_call` records each call
-3. On the **3rd** identical call (under `strict`, `max_loop_repeats=3`), the
-   loop check fires → `state.terminate_requested = True`
-4. The 4th `pre_tool_call` returns the block directive:
-   `{"action": "block", "message": "hermeskill apoptosis: loop ... End the session."}`
-5. Hermes surfaces that as the tool error to the LLM, which reads "end the
-   session" and stops calling tools
-6. Hermes' session naturally ends → `on_session_end` fires
-7. Hermeskill posts the death certificate to the control plane
-
-### 6. Inspect the kill
-
-```powershell
-uv run hermeskill fleet
-uv run hermeskill logs <agent_id_from_above>
-```
-
-The death-cert URL printed in step 5 opens a one-click "this kill was
-right / wrong" page (single-use signed token). The full symptom log,
-shutdown sequence, and cost summary are queryable via the CLI or the
-control plane's REST API.
-
-### Other scenarios
-
-- **Scope violation:** keep `strict` policy (allowlist: `read_file`, `search`),
-  prompt: *"Use the terminal tool to run `ls`"* → fires
-  `tool_scope_violation` on the first call.
-- **Cost cap:** `$env:HERMESKILL_POLICY = "strict"` (cost cap = $2), prompt a
-  long-context task → fires `token_runaway` once cumulative cost crosses
-  the cap.
-- **Wall-clock:** also `strict` (5 min cap), prompt a long-running task →
-  fires `wall_clock` after 5 minutes.
-- **Manual kill:** while a session is running, in a third terminal:
-  `uv run hermeskill kill <agent_id> --reason "operator demo"` — the next
-  `pre_tool_call` blocks with `manual_kill`. See the whole operator→agent path
-  offline (no key) in the [`manualkill` scenario](docs/offline-demo.md#scenarios).
-
-### Stopping the control plane
-
-Ctrl+C in the terminal running `_run_control_plane`. The on-disk SQLite
-file is recreated next time you start it, so demo data is ephemeral.
+- **Loop:** prompt Hermes to call one tool repeatedly with identical args
+  (*"read README.md six times with the read_file tool, exact same args every
+  call"*) → fires `loop` on the 3rd identical call under `strict`.
+- **Scope violation:** with `strict` (allowlist: `read_file`, `search`), prompt
+  *"use the terminal tool to run `ls`"* → fires `tool_scope_violation` on the
+  first call.
+- **Cost cap:** `strict` caps cost at $2 — prompt a long-context task → fires
+  `token_runaway` once cumulative cost crosses the cap.
+- **Wall-clock:** `strict` caps wall-clock at 5 min — prompt a long-running task.
+- **Manual kill:** while a session runs, from another terminal:
+  `hermeskill kill <agent_id> --reason "operator kill"` → the next
+  `pre_tool_call` blocks with `manual_kill`.
 
 ---
 
@@ -341,12 +254,11 @@ your laptop reads the config file. Use an **operator-role** key if you want
 > uv pip install --python /path/to/hermes/venv/bin/python hermeskill-hermes
 > ```
 >
-> In the `uv sync` demo flow this is a non-issue — Hermes and Hermeskill share the
-> workspace venv, so `uv run hermes` sees the plugin automatically.
+> In the `uv sync` workspace flow this is a non-issue — Hermes and Hermeskill
+> share the workspace venv, so `uv run hermes` sees the plugin automatically.
 
 The control plane runs as a separate service (FastAPI + Postgres). For
-local dev with Postgres instead of the in-process SQLite used by the
-demo:
+local dev:
 
 ```bash
 uv run --package hermeskill-control-plane \
@@ -383,7 +295,7 @@ Shipped defaults live in the SDK:
 | `coding-default` | 5 repeats / 20 actions | $25.00 | 30 min | `tool_scope_violation` |
 | `permissive` | 10 repeats / 40 actions | $100.00 | 2 h | `tool_scope_violation`, `loop` |
 
-`strict` ships a tight tool allowlist (`read_file`, `search`) for untrusted code paths. `coding-default` is what the demo runs. `permissive` opens the tool surface entirely (`tool_allowlist=[]` is treated as "any tool") and is meant for trusted internal agents under active operator supervision.
+`strict` ships a tight tool allowlist (`read_file`, `search`) for untrusted code paths. `coding-default` is the recommended baseline for everyday coding agents. `permissive` opens the tool surface entirely (`tool_allowlist=[]` is treated as "any tool") and is meant for trusted internal agents under active operator supervision.
 
 Customers can also pass a custom `Policy` object via `policy=...` on the watch call. Server-side custom policies (load-from-YAML + CRUD on the control plane) are on the roadmap.
 
@@ -453,7 +365,7 @@ vars set. These configure the control-plane level-up.
 | `HERMESKILL_DB_URL` | Control-plane Postgres DSN | Control plane only |
 | `HERMESKILL_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
 
-`.env` at the repo root is read automatically by the demo and CLI entry points (`.env.example` documents the keys; `.env` is git-ignored). For a persistent, directory-independent setup, run `hermeskill init` once to write these into `~/.hermeskill/config.toml` instead — env vars still override the file when set, so CI and one-off shells keep working unchanged.
+`.env` at the repo root is read automatically by the CLI entry points (`.env.example` documents the keys; `.env` is git-ignored). For a persistent, directory-independent setup, run `hermeskill init` once to write these into `~/.hermeskill/config.toml` instead — env vars still override the file when set, so CI and one-off shells keep working unchanged.
 
 ---
 
@@ -519,9 +431,8 @@ The mechanism is deliberately small and honest, not "adaptive AI":
   numeric limits and can be suggested; a symptom like `tool_scope_violation`
   (an allowlist, not a number) is reported as stats only.
 
-See it run end-to-end — file kills, label them, read the report — in the
-[`calibrate` scenario](docs/offline-demo.md#scenarios). The heuristic itself is a pure function
-over labeled kills ([`hermeskill.calibration`](packages/hermeskill-sdk/src/hermeskill/calibration.py)),
+The heuristic itself is a pure function over labeled kills
+([`hermeskill.calibration`](packages/hermeskill-sdk/src/hermeskill/calibration.py)),
 so it's unit-tested without a database.
 
 ---
@@ -532,14 +443,12 @@ Hermeskill is honest about where it is.
 
 - ✅ **Hard-kill supervisor mode (Phase 2) — shipped.** The watched agent runs
   in a child process; the parent escalates SIGTERM → grace → SIGKILL, closing
-  the cooperative-kill gap. See [`ProcessSupervisor`](packages/hermeskill-sdk/src/hermeskill/supervisor.py)
-  and the [`hardkill` scenario](docs/offline-demo.md#scenarios). Cooperative
-  shutdown stays the default; hard-kill is opt-in for untrusted or wedge-prone
-  agents.
+  the cooperative-kill gap. See [`ProcessSupervisor`](packages/hermeskill-sdk/src/hermeskill/supervisor.py).
+  Cooperative shutdown stays the default; hard-kill is opt-in for untrusted or
+  wedge-prone agents.
 - ✅ **Feedback-driven calibration (Phase 4) — shipped.** The death-cert feedback
   labels feed an advisory, suggest-only calibration report — see
-  [Calibration](#calibration-tuning-from-feedback) below and the
-  [`calibrate` scenario](docs/offline-demo.md#scenarios). It suggests *looser*
+  [Calibration](#calibration-tuning-from-feedback). It suggests *looser*
   limits where operators flag false positives; it never auto-applies and never
   tightens.
 Hermes Agent is the supported runtime. Further directions are demand-driven
@@ -616,7 +525,6 @@ cd hermeskill
 uv sync                                          # installs all workspace packages
 
 uv run pytest -q                                 # full suite (control-plane tests need Postgres)
-uv run pytest demo/tests -q                      # offline demo smoke test (no Postgres)
 uv run mypy packages/hermeskill-sdk/src packages/hermeskill-control-plane/src packages/hermeskill-hermes/src
 uv run ruff check .                              # lint
 ```

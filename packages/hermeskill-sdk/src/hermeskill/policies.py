@@ -3,7 +3,7 @@
 Three defaults ship with the SDK and are available by name to `watch()`:
 
     watch(graph, name="...", policy="strict")          # least permissive
-    watch(graph, name="...", policy="coding-default")  # the demo's policy
+    watch(graph, name="...", policy="coding-default")  # everyday coding agents
     watch(graph, name="...", policy="permissive")      # loose, for exploration
 
 Custom policies (load-from-YAML / server-side CRUD) land in M5 alongside
