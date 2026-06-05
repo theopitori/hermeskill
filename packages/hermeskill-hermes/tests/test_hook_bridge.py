@@ -20,9 +20,13 @@ Coverage:
 
 from __future__ import annotations
 
+import logging
+
+import pytest
 from hermeskill.checks import Terminal
 from hermeskill.types import EventType, SymptomType
 from hermeskill.watcher import WatcherState
+from hermeskill_hermes import bridge
 from hermeskill_hermes.bridge import (
     on_post_api_request,
     on_post_tool_call,
@@ -179,3 +183,118 @@ def test_first_cause_wins_across_verdicts() -> None:
     # Subsequent calls don't overwrite first reason
     on_pre_tool_call(s, "other_tool", {"x": 1})
     assert s.terminate_reason == first_reason
+
+
+# --- fail-open: a broken check must not propagate out of the bridge ----------
+#
+# bridge.py's contract is "these functions do not raise". S2 guards the
+# `run_all` / `apply_grants` execution so a bug in a check degrades to
+# fail-open (no verdict this call) instead of escaping the hook — which would
+# make Hermes drop our verdict, run the tool, and silently disable supervision
+# on every boundary. These tests pin that behaviour.
+
+
+@pytest.fixture(autouse=True)
+def _clear_check_failure_log() -> object:
+    """Each test starts with a clean per-agent failure-log set."""
+    bridge._CHECK_FAILURE_LOGGED.clear()
+    yield
+    bridge._CHECK_FAILURE_LOGGED.clear()
+
+
+def _boom(*_args: object, **_kwargs: object) -> object:
+    raise RuntimeError("check is broken")
+
+
+def test_pre_tool_call_failopen_when_run_all_raises(
+    state: WatcherState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bridge, "run_all", _boom)
+    # Must not propagate, and must not wedge the bridge (returns cleanly).
+    verdicts = on_pre_tool_call(state, "read_file", {"path": "/tmp/a"})
+    assert verdicts == []
+    assert not state.terminate_requested
+
+
+def test_pre_tool_call_failopen_when_apply_grants_raises(
+    state: WatcherState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bridge, "apply_grants", _boom)
+    verdicts = on_pre_tool_call(state, "read_file", {"path": "/tmp/a"})
+    # apply_grants failing degrades to the ungranted verdicts (none here).
+    assert verdicts == []
+    assert not state.terminate_requested
+
+
+def test_post_tool_call_failopen_when_run_all_raises(
+    state: WatcherState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bridge, "run_all", _boom)
+    on_post_tool_call(state, "read_file", {}, "output")  # must not raise
+    assert not state.terminate_requested
+
+
+def test_post_api_request_failopen_when_run_all_raises(
+    state: WatcherState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bridge, "run_all", _boom)
+    on_post_api_request(state, "claude-opus-4-7", 100, 50)  # must not raise
+    # Recording still happened even though the check execution failed.
+    assert state.total_input_tokens == 100
+    assert not state.terminate_requested
+
+
+def test_seed_scope_verdict_survives_when_run_all_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool-scope Terminal is computed by the caller and seeded into
+    `_run_checks_failopen`. Even if `run_all` blows up, the seed must survive
+    and still arm the kill — a broken cost/loop check can't disable scope
+    enforcement."""
+    policy = make_policy().model_copy(update={"tool_allowlist": ["read_file"]})
+    s = make_state(policy)
+    monkeypatch.setattr(bridge, "run_all", _boom)
+    verdicts = on_pre_tool_call(s, "delete_everything", {})
+    assert any(
+        isinstance(v, Terminal) and v.symptom == SymptomType.TOOL_SCOPE_VIOLATION
+        for v in verdicts
+    )
+    assert s.terminate_requested
+
+
+def test_real_terminal_survives_when_apply_grants_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If `run_all` returns a real Terminal but `apply_grants` then blows up,
+    the ungranted verdicts are returned — so the kill still fires. Fail-open
+    here means failing *toward* killing (the safe direction): a broken grant
+    layer must not silently keep a runaway agent alive."""
+    policy = make_policy(max_cost_usd=0.00001)
+    s = make_state(policy)
+    s.total_cost_usd = 1.0  # already over the cap → run_all yields a Terminal
+    monkeypatch.setattr(bridge, "apply_grants", _boom)
+    verdicts = on_pre_tool_call(s, "read_file", {})
+    assert any(
+        isinstance(v, Terminal) and v.symptom == SymptomType.TOKEN_RUNAWAY
+        for v in verdicts
+    )
+    assert s.terminate_requested
+
+
+def test_check_failure_logged_once_per_agent(
+    state: WatcherState,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A reliably-broken check must be visible (logged with traceback) but must
+    not flood the log — exactly one record per agent across many calls."""
+    monkeypatch.setattr(bridge, "run_all", _boom)
+    with caplog.at_level(logging.ERROR, logger="hermeskill_hermes.bridge"):
+        for _ in range(5):
+            on_pre_tool_call(state, "read_file", {"path": "/tmp/a"})
+
+    failure_records = [
+        r for r in caplog.records if "check execution" in r.getMessage()
+    ]
+    assert len(failure_records) == 1
+    assert state.agent_id in bridge._CHECK_FAILURE_LOGGED

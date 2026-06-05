@@ -34,9 +34,19 @@ slow network call ignoring cooperative shutdown) — which is what the
 plan's "blocked-loop test" intends to exercise.
 
 Public surface: `Watchdog(state, grace_seconds)`, `.arm(loop, task)`,
-`.stop()`. Idempotent arming — call from `on_chain_start` every time;
-the first call starts the thread, later calls just refresh the captured
-loop + task in case a new invocation runs in a different task.
+`.stop()`. `.arm()` is what starts the thread — idempotent, so a framework
+adapter calls it on every agent-invocation boundary; the first call starts
+the thread, later calls just refresh the captured loop + task in case a new
+invocation runs in a different task.
+
+**Not used in the Hermes integration.** This is an SDK primitive for adapters
+whose agent runs as a cancellable asyncio *task*. Hermes' agent loop is
+synchronous and exposes no such task to cancel (it drives plugin hooks via
+plain `cb(**kwargs)` calls), so the Hermes adapter never arms a Watchdog: L1
+(the cooperative block directive) is the enforcing layer and
+`ProcessSupervisor` (hard SIGTERM→SIGKILL) is the escape hatch for wedged
+sync/CPU-bound agents. The class is kept for its tested standalone behaviour
+and any future async-task adapter — it is exercised by `tests/test_watchdog.py`.
 """
 
 from __future__ import annotations

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import UUID
 
 from hermeskill.checks import (
     Terminal,
@@ -42,6 +43,51 @@ from hermeskill.checks import (
 from hermeskill.watcher import WatcherState
 
 logger = logging.getLogger("hermeskill_hermes.bridge")
+
+# Agents for which check execution has already raised once. We log the first
+# failure with a full traceback, then stay silent for that agent so a
+# reliably-broken check (e.g. a malformed policy) can't flood the log at every
+# tool boundary. Only ever gains an entry on the pathological path.
+_CHECK_FAILURE_LOGGED: set[UUID] = set()
+
+
+def _run_checks_failopen(
+    state: WatcherState,
+    seed: list[Terminal | Warning] | None = None,
+) -> list[Terminal | Warning]:
+    """Run `run_all` + `apply_grants`, but never raise.
+
+    The module contract is that these functions "do not raise"; this enforces
+    it. A bug in a check must not propagate out of a Hermes hook (Hermes would
+    log it, drop our verdict, and run the tool — silently disabling supervision
+    on every call). On failure we degrade to **fail-open** for this one call
+    (no new verdict) rather than crashing the agent, and log once per agent.
+
+    ``seed`` carries verdicts already computed by the caller (e.g. a tool-scope
+    Terminal) so they survive even if `run_all` itself throws.
+    """
+    verdicts: list[Terminal | Warning] = list(seed) if seed else []
+    try:
+        verdicts.extend(run_all(state, state.policy))
+    except Exception:
+        _log_check_failure_once(state, "run_all")
+    try:
+        return apply_grants(verdicts, state.grants)
+    except Exception:
+        _log_check_failure_once(state, "apply_grants")
+        return verdicts
+
+
+def _log_check_failure_once(state: WatcherState, where: str) -> None:
+    if state.agent_id in _CHECK_FAILURE_LOGGED:
+        return
+    _CHECK_FAILURE_LOGGED.add(state.agent_id)
+    logger.exception(
+        "bridge: check execution (%s) raised for agent %s; supervision "
+        "degraded to fail-open for this call. Logged once per agent.",
+        where,
+        state.agent_id,
+    )
 
 
 def on_pre_tool_call(
@@ -74,8 +120,7 @@ def on_pre_tool_call(
     except Exception:
         logger.exception("bridge.on_pre_tool_call: failed to record tool call")
 
-    verdicts.extend(run_all(state, state.policy))
-    all_verdicts = apply_grants(verdicts, state.grants)
+    all_verdicts = _run_checks_failopen(state, seed=verdicts)
 
     for v in all_verdicts:
         severity = "terminal" if isinstance(v, Terminal) else "warning"
@@ -114,7 +159,7 @@ def on_post_tool_call(
     except Exception:
         logger.exception("bridge.on_post_tool_call: failed to record")
 
-    verdicts = apply_grants(run_all(state, state.policy), state.grants)
+    verdicts = _run_checks_failopen(state)
     for v in verdicts:
         if isinstance(v, Terminal) and not state.terminate_requested:
             state.request_termination(v.reason)
@@ -147,7 +192,7 @@ def on_post_api_request(
     except Exception:
         logger.exception("bridge.on_post_api_request: failed to record")
 
-    verdicts = apply_grants(run_all(state, state.policy), state.grants)
+    verdicts = _run_checks_failopen(state)
     for v in verdicts:
         if isinstance(v, Terminal) and not state.terminate_requested:
             state.request_termination(v.reason)

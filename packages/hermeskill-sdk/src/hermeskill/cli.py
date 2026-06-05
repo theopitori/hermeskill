@@ -31,7 +31,7 @@ from hermeskill.client import (
     NotFoundError,
     TransportError,
 )
-from hermeskill.config import DEFAULT_BASE_URL, SDKConfig, save_config
+from hermeskill.config import CONFIG_PATH, DEFAULT_BASE_URL, SDKConfig, save_config
 from hermeskill.exceptions import HermeskillError
 from hermeskill.policies import UnknownPolicyError, resolve_policy
 from hermeskill.types import (
@@ -192,6 +192,119 @@ def enable_hermes(
     save_config(cfg)
     console.print(f"[green]✓[/green] enabled hermeskill in {path}")
     console.print("[dim]Run Hermes and Hermeskill supervises every session.[/dim]")
+
+
+# --- doctor --------------------------------------------------------------
+
+
+@app.command()
+def doctor() -> None:
+    """Diagnose the Hermeskill wiring and print what supervision will do.
+
+    Read-only — touches no network and changes no files. Reports, with ✓/✗:
+
+      • whether Hermes Agent is importable from this environment;
+      • whether the Hermeskill plugin packages are importable;
+      • whether ``hermeskill`` is listed in your Hermes ``plugins.enabled``;
+      • the resolved SDK config + mode (control-plane vs local-only/keyless),
+        policy, agent name, and local-cert setting.
+
+    Exit code is non-zero if a *blocking* problem is found (Hermes missing, or
+    the plugin not enabled) — so it's usable as a smoke check in scripts.
+    """
+    problems = 0
+
+    console.print("[bold]Hermeskill doctor[/bold]")
+
+    # 1. Hermes importable? (same probe enable-hermes uses.)
+    hermes_config_path: object | None = None
+    hermes_enabled_list: list[object] | None = None
+    try:
+        from hermes_cli.config import (  # type: ignore[import-untyped, unused-ignore]
+            get_config_path,
+            load_config,
+        )
+
+        console.print("  [green]✓[/green] Hermes Agent is importable")
+        try:
+            hermes_config_path = get_config_path()
+            cfg = load_config()
+            plugins = cfg.get("plugins") if isinstance(cfg, dict) else None
+            enabled = plugins.get("enabled") if isinstance(plugins, dict) else None
+            if isinstance(enabled, list):
+                hermes_enabled_list = list(enabled)
+        except Exception as exc:  # diagnostics must never crash
+            console.print(
+                f"  [yellow]…[/yellow] could not read Hermes config: {exc}"
+            )
+    except ImportError:
+        problems += 1
+        console.print(
+            "  [red]✗[/red] Hermes Agent is NOT importable from this "
+            "environment\n"
+            "      [dim]install it alongside the plugin, e.g.:\n"
+            "        uv tool install hermes-agent --with hermeskill-hermes[/dim]"
+        )
+
+    # 2. Plugin packages importable?
+    try:
+        import hermeskill_hermes  # type: ignore[import-not-found, unused-ignore]  # noqa: F401
+
+        console.print("  [green]✓[/green] hermeskill-hermes plugin is importable")
+    except ImportError:
+        problems += 1
+        console.print(
+            "  [red]✗[/red] hermeskill-hermes is NOT importable\n"
+            "      [dim]install it into the same environment as Hermes.[/dim]"
+        )
+
+    # 3. Plugin enabled in the Hermes config?
+    if hermes_config_path is not None:
+        console.print(f"  [dim]Hermes config:[/dim] {hermes_config_path}")
+        if hermes_enabled_list is None:
+            console.print(
+                "  [yellow]…[/yellow] plugins.enabled is missing or not a list "
+                "in your Hermes config"
+            )
+        elif "hermeskill" in hermes_enabled_list:
+            console.print(
+                "  [green]✓[/green] hermeskill is enabled in plugins.enabled"
+            )
+        else:
+            problems += 1
+            console.print(
+                "  [red]✗[/red] hermeskill is NOT in plugins.enabled\n"
+                "      [dim]run `hermeskill enable-hermes` to add it.[/dim]"
+            )
+
+    # 4. Resolved SDK config + mode.
+    config = SDKConfig.load()
+    console.print(f"  [dim]SDK config:[/dim] {CONFIG_PATH}"
+                  + ("" if CONFIG_PATH.exists() else " [dim](not written yet)[/dim]"))
+    if config.api_key:
+        console.print(
+            f"  [green]✓[/green] mode: control-plane "
+            f"[dim](base_url={config.base_url})[/dim]"
+        )
+    else:
+        console.print(
+            "  [yellow]●[/yellow] mode: local-only (keyless) — in-process "
+            "supervision + local death certs; no fleet view / remote kill / "
+            "grants\n"
+            "      [dim]set HERMESKILL_API_KEY (or run `hermeskill init`) to "
+            "attach a control plane.[/dim]"
+        )
+    console.print(f"  [dim]policy:[/dim]     {config.policy or 'coding-default (adapter default)'}")
+    console.print(f"  [dim]agent name:[/dim] {config.agent_name or '(adapter default)'}")
+    console.print(f"  [dim]local cert:[/dim] {'on' if config.local_cert else 'off'}")
+
+    if problems:
+        console.print(
+            f"\n[red]{problems} blocking problem(s) found.[/red] "
+            "[dim]Supervision will not run until these are fixed.[/dim]"
+        )
+        raise typer.Exit(1)
+    console.print("\n[green]✓ wiring looks good.[/green]")
 
 
 # --- shared error handling ----------------------------------------------
