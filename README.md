@@ -59,6 +59,9 @@ terminal, saving a copy to `~/.hermeskill/kills/`**:
 Proof it's real: a [Hermes + GPT-4o kill, verbatim](docs/real-kill.md) — an
 unscripted run, no edits.
 
+Want to watch it happen live instead of reading the autopsy? Run
+[`hermeskill monitor`](#live-monitor) in a second terminal.
+
 That's the whole main function — **kill + autopsy, zero config**. The symptom
 checks (loop, cost, wall-clock, tool-scope) run entirely in your agent's
 process and need no network. Running a control plane is an **optional level-up**
@@ -114,6 +117,7 @@ For each watched agent you get:
 
 - **Live symptom checks** — loop induction, token-runaway, cost cap, wall-clock cap, tool-scope violation, heartbeat loss.
 - **A death certificate** — symptom log, shutdown sequence, one-click feedback URL the operator can label.
+- **A live monitor** — `hermeskill monitor` streams vitals to a terminal pane that flatlines the moment apoptosis fires. Keyless, no server.
 - **A grant system** — operators can suppress one symptom for a bounded window when a kill would be wrong.
 
 ---
@@ -345,6 +349,51 @@ hermeskill revoke <grant_id>                    # idempotent revoke
 
 ---
 
+## Live monitor
+
+The death certificate is the post-mortem. `hermeskill monitor` is the agent
+**dying in real time** — a live vitals pane you run in a second terminal next to
+your agent:
+
+```bash
+hermeskill monitor          # auto-follows the freshest live agent
+```
+
+```text
+┌─────────────────────── ● ALIVE  coding-agent ────────────────────────┐
+│ ───╿────────────────────────                                         │
+│ cost   ███████████████████░░░░░  $1.6200 / $2.00                     │
+│ loop   ██████████░░░░░░░░░░░░░░  2 / 5 repeats                       │
+│ time   ████░░░░░░░░░░░░░░░░░░░░  47s / 300s                          │
+│ tools 12   ·   tokens 20,300 (18,200 in / 2,100 out)                 │
+└───────────────────── policy strict · local-only ─────────────────────┘
+```
+
+Watch the cost gauge climb toward the cap and loop-pressure fill; the moment a
+symptom trips, the pane goes red and **flatlines** with the kill reason, the
+symptoms, and (when `local_cert` is on) the death certificate spliced in:
+
+```text
+┌────────────────────── † FLATLINE  coding-agent ──────────────────────┐
+│ ────────────────────────────                                         │
+│ reason  token_runaway: cumulative cost $2.04 ≥ cap $2.00             │
+│ symptoms                                                             │
+│   • token_runaway (terminal)  over cap                               │
+└───────────────────── policy strict · local-only ─────────────────────┘
+```
+
+**Keyless, like the rest of the kill path.** The plugin writes a small vitals
+snapshot to `~/.hermeskill/live/<agent_id>.json` on every tool call + LLM turn
+(best-effort — a write hiccup never touches the agent it watches), and the
+monitor tails it. No control plane, no API key — it's the local sibling of
+`hermeskill logs --follow`. The loop gauge reuses the exact count the loop check
+kills on, so what you watch is what fires.
+
+Pass an agent id to pin one (`hermeskill monitor <agent_id>`); set
+`HERMESKILL_LIVE=0` to skip the per-tick write for agents you never monitor.
+
+---
+
 ## Grants — apoptosis-proofing
 
 Sometimes a kill would be wrong. A known-flaky integration test legitimately loops. A long-running data export blows the wall-clock cap. Hermeskill lets the operator pre-authorize the exception:
@@ -372,6 +421,7 @@ vars set. These configure the control-plane level-up.
 | `HERMESKILL_AGENT_NAME` | Display name for the registered agent | Optional |
 | `HERMESKILL_POLICY` | Named policy override | Optional |
 | `HERMESKILL_LOCAL_CERT` | Print + save the death cert locally on a kill | Optional (default: on; set `0` to disable) |
+| `HERMESKILL_LIVE` | Write the live-vitals snapshot for `hermeskill monitor` | Optional (default: on; set `0` to disable) |
 | `HERMESKILL_DB_URL` | Control-plane Postgres DSN | Control plane only |
 | `HERMESKILL_OPERATOR_KEY` | Operator-role API key (kills, grants) | Operator workflows |
 
@@ -389,6 +439,7 @@ uv run --package hermeskill-control-plane \
 
 # operator CLI
 hermeskill fleet
+hermeskill monitor                                                  # live vitals pane (keyless)
 hermeskill logs <agent_id>
 hermeskill kill <agent_id> --reason "..."
 hermeskill grant <agent_id> --symptoms loop --duration 1h --reason "..."
