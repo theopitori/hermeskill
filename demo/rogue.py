@@ -1,6 +1,6 @@
 """Scripted, offline rogue agent — the engine behind ``python -m demo``.
 
-This module drives the **real** Caspase detection engine (``caspase.checks``
+This module drives the **real** Hermeskill detection engine (``hermeskill.checks``
 over a real ``WatcherState``) into each terminal symptom, deterministically and
 with no LLM and no network beyond the in-process control plane. It is the
 runtime-agnostic core: no Hermes, no LangGraph — just the SDK doing the kill,
@@ -17,16 +17,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from caspase.checks import Terminal, Warning, check_tool_scope, run_all
-from caspase.policies import resolve_policy
-from caspase.watcher import WatcherState
+from hermeskill.checks import Terminal, Warning, check_tool_scope, run_all
+from hermeskill.policies import resolve_policy
+from hermeskill.watcher import WatcherState
 
 # Scenarios the demo can run. ``loop`` is the headline (and the GIF subject);
 # the others exist so every shipped symptom has a one-command repro.
 SCENARIOS = ("loop", "cost", "scope", "wall_clock")
 DEFAULT_SCENARIO = "loop"
 
-# A model present in caspase.pricing so cost actually accrues in the cost demo.
+# A model present in hermeskill.pricing so cost actually accrues in the cost demo.
 _EXPENSIVE_MODEL = "claude-opus-4-7"  # $15 / $75 per 1M tok
 
 
@@ -68,7 +68,7 @@ def new_state(policy_name: str, agent_id: UUID, name: str) -> WatcherState:
 
 def _commit_terminal(state: WatcherState, verdict: Terminal) -> None:
     """Record the symptom + flip the apoptosis flag, mirroring what a
-    framework adapter (e.g. ``caspase_hermes.bridge``) does on a Terminal."""
+    framework adapter (e.g. ``hermeskill_hermes.bridge``) does on a Terminal."""
     state.record_symptom(
         symptom=verdict.symptom,
         severity="terminal",

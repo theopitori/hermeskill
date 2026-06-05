@@ -3,7 +3,7 @@
 The other scenarios show the *cooperative* path (a block directive the agent is
 asked to honour). This one shows the case that path can't handle: an agent
 wedged in CPU-bound code that ignores cooperative shutdown entirely. The L3
-:class:`~caspase.supervisor.ProcessSupervisor` runs it in a child process and
+:class:`~hermeskill.supervisor.ProcessSupervisor` runs it in a child process and
 escalates to an OS-level **SIGKILL** the agent cannot catch — then files a death
 certificate whose shutdown log records the real ``supervisor_sigterm`` →
 ``supervisor_sigkill`` sequence.
@@ -62,15 +62,15 @@ async def run_hardkill_demo(*, quiet: bool = False) -> HardkillOutcome:
         if not quiet:
             print(*args)
 
-    from caspase.apoptosis import build_death_certificate, build_kill_event_payload
-    from caspase.client import CaspaseClient
-    from caspase.policies import resolve_policy
-    from caspase.supervisor import ProcessSupervisor
-    from caspase.types import SymptomType
-    from caspase.watcher import WatcherState
+    from hermeskill.apoptosis import build_death_certificate, build_kill_event_payload
+    from hermeskill.client import HermeskillClient
+    from hermeskill.policies import resolve_policy
+    from hermeskill.supervisor import ProcessSupervisor
+    from hermeskill.types import SymptomType
+    from hermeskill.watcher import WatcherState
 
     say()
-    say(bold(cyan("  CASPASE")) + dim("  ·  hard-kill supervisor (L3)"))
+    say(bold(cyan("  HERMESKILL")) + dim("  ·  hard-kill supervisor (L3)"))
     say(dim("  policy: strict   scenario: hardkill"))
     say(dim("  " + RULE))
     say()
@@ -81,14 +81,14 @@ async def run_hardkill_demo(*, quiet: bool = False) -> HardkillOutcome:
     say()
 
     say(f"{cyan('▸')} booting in-process control plane {dim('(sqlite, no postgres)')} …")
-    _demo_db = Path(tempfile.gettempdir()) / "caspase-demo.db"
-    os.environ["CASPASE_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
+    _demo_db = Path(tempfile.gettempdir()) / "hermeskill-demo.db"
+    os.environ["HERMESKILL_DB_URL"] = f"sqlite+aiosqlite:///{_demo_db}"
     server, serve_task = await start_control_plane()
-    os.environ["CASPASE_API_KEY"] = _DEV_DEVELOPER_KEY
-    os.environ["CASPASE_BASE_URL"] = _BASE_URL
+    os.environ["HERMESKILL_API_KEY"] = _DEV_DEVELOPER_KEY
+    os.environ["HERMESKILL_BASE_URL"] = _BASE_URL
     say(f"  {green('✓')} control plane up at {dim(_BASE_URL)}")
 
-    client = CaspaseClient.from_config()
+    client = HermeskillClient.from_config()
     kill_event_id: int | None = None
     try:
         reg = await client.register_agent(name=_AGENT_NAME, policy_name="strict")

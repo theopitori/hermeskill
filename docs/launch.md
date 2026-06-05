@@ -1,6 +1,6 @@
 # Launch copy
 
-Ready-to-paste announcement text for Caspase. Not part of the package —
+Ready-to-paste announcement text for Hermeskill. Not part of the package —
 delete or keep as you like. Swap the demo GIF/asciinema link once recorded.
 
 ---
@@ -10,7 +10,7 @@ delete or keep as you like. Swap the demo GIF/asciinema link once recorded.
 **Title** (HN caps title length ~80 chars; this fits):
 
 ```
-Show HN: Caspase – an off-switch and autopsy for runaway AI agents
+Show HN: Hermeskill – an off-switch and autopsy for runaway AI agents
 ```
 
 **Body:**
@@ -21,7 +21,7 @@ context that balloons past the budget, a 40-minute wall-clock run that should
 have been 40 seconds. The agent doesn't know it's stuck, and by the time I
 notice, the bill is already spent.
 
-Caspase is a supervisor that watches every tool call and LLM turn and
+Hermeskill is a supervisor that watches every tool call and LLM turn and
 terminates the agent the moment it goes wrong — then writes a death
 certificate you can audit. It checks for: identical-args call loops,
 token/cost runaway, wall-clock overrun, out-of-scope tool calls, and
@@ -30,7 +30,7 @@ certificate records the symptom log, the shutdown sequence, and a one-click
 "this kill was right / wrong" feedback link so you can tune the policy.
 
 It ships today as a drop-in plugin for Hermes Agent — `pip install
-caspase-hermes`, add `caspase` to plugins.enabled, done. The kill path uses
+hermeskill-hermes`, add `hermeskill` to plugins.enabled, done. The kill path uses
 Hermes' canonical pre_tool_call block directive (hooks are non-blocking, so
 you can't just raise out of the loop), which means the harm halts immediately:
 no further tool runs, no further spend.
@@ -51,7 +51,7 @@ untrusted/long-running agents you still want to run them in their own
 subprocess. The threat model and what it explicitly does NOT do are in
 SECURITY.md.
 
-Repo: https://github.com/theopitori/caspase
+Repo: https://github.com/theopitori/hermeskill
 Would love feedback on the symptom set — what runaway mode have you hit that
 these five checks would miss?
 ```
@@ -68,10 +68,10 @@ these five checks would miss?
 ```
 Your AI agent just spent $40 looping on the same tool call and nobody noticed.
 
-Caspase is the off-switch. It watches every tool call + LLM turn, kills the
+Hermeskill is the off-switch. It watches every tool call + LLM turn, kills the
 agent the moment it goes runaway, and hands you a death certificate.
 
-pip install caspase-hermes
+pip install hermeskill-hermes
 
 [demo.gif]
 ```
@@ -92,7 +92,7 @@ Any one fires → clean kill → an auditable record of exactly why.
 **3/**
 
 ```
-The kill is honest. Hermes hooks are non-blocking, so Caspase uses the
+The kill is honest. Hermes hooks are non-blocking, so Hermeskill uses the
 canonical pre_tool_call block directive: the moment a check fires, no more
 tools run, no more spend. The model is told to end the session.
 ```
@@ -110,7 +110,7 @@ tokens, model id — reaches the control plane, which you run yourself.
 ```
 0.1 alpha. Hermes Agent today, more runtimes next.
 
-Repo + 5-min demo: https://github.com/theopitori/caspase
+Repo + 5-min demo: https://github.com/theopitori/hermeskill
 
 What runaway mode have you hit that these checks would've caught?
 ```

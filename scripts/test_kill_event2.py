@@ -8,12 +8,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-DB_PATH = Path("C:/Temp/caspase-test2.db")
+DB_PATH = Path("C:/Temp/hermeskill-test2.db")
 
 
 async def main() -> None:
     DB_PATH.unlink(missing_ok=True)
-    os.environ["CASPASE_DB_URL"] = f"sqlite+aiosqlite:///{DB_PATH}"
+    os.environ["HERMESKILL_DB_URL"] = f"sqlite+aiosqlite:///{DB_PATH}"
 
     import uuid as _uuid_module
 

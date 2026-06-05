@@ -1,0 +1,38 @@
+[project]
+name = "hermeskill-hermes"
+version = "0.1.0a1"
+description = "Hermeskill apoptosis plugin for Hermes Agent — install once, your agent never runs away again"
+readme = "src/hermeskill_hermes/README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "hermeskill>=0.1.0a1",
+]
+
+[project.urls]
+Homepage = "https://github.com/theopitori/hermeskill"
+Documentation = "https://github.com/theopitori/hermeskill#readme"
+
+# Hermes Agent plugin auto-discovery: when this package is installed,
+# Hermes finds it via importlib.metadata. The loader does
+# `module = ep.load(); getattr(module, "register")` — so the entry-point
+# value must resolve to the MODULE (which exposes register(ctx)), NOT the
+# function itself. Pointing at `hermeskill_hermes:register` would make
+# ep.load() return the function, and getattr(function, "register") is
+# None → "no register() function". See hermes_cli/plugins.py
+# ::_load_entrypoint_module + _load_plugin.
+[project.entry-points."hermes_agent.plugins"]
+hermeskill = "hermeskill_hermes"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hermeskill_hermes"]
+
+# Ship plugin.yaml inside the wheel so the directory-install path
+# (cp -r into ~/.hermes/plugins/hermeskill/) also has a valid manifest.
+# Entry-point installs don't read this file but won't reject it either.
+[tool.hatch.build.targets.wheel.force-include]
+"src/hermeskill_hermes/plugin.yaml" = "hermeskill_hermes/plugin.yaml"

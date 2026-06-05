@@ -1,16 +1,16 @@
 [project]
-name = "caspase-workspace"
+name = "hermeskill-workspace"
 version = "0.0.0"
-description = "Caspase — agent supervision via the apoptosis protocol"
+description = "Hermeskill — agent supervision via the apoptosis protocol"
 requires-python = ">=3.11"
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
-caspase = { workspace = true }
-caspase-control-plane = { workspace = true }
-caspase-hermes = { workspace = true }
+hermeskill = { workspace = true }
+hermeskill-control-plane = { workspace = true }
+hermeskill-hermes = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -23,14 +23,14 @@ dev = [
     "aiosqlite>=0.20",
     # Workspace members — listed here so a bare `uv sync` (without
     # --all-packages) installs them editable into the venv. Without these,
-    # `uv sync` would only install the workspace root, leaving caspase /
-    # caspase-control-plane / caspase-hermes uninstalled — and Hermes'
+    # `uv sync` would only install the workspace root, leaving hermeskill /
+    # hermeskill-control-plane / hermeskill-hermes uninstalled — and Hermes'
     # entry-point scan would not discover the plugin.
-    "caspase",
-    "caspase-control-plane",
-    "caspase-hermes",
+    "hermeskill",
+    "hermeskill-control-plane",
+    "hermeskill-hermes",
     # Real Hermes Agent in the workspace venv so 'uv run hermes ...' discovers
-    # our caspase-hermes plugin via the hermes_agent.plugins entry-point group.
+    # our hermeskill-hermes plugin via the hermes_agent.plugins entry-point group.
     # See README "Try it" section for the integration walkthrough.
     "hermes-agent>=0.14",
 ]
@@ -58,4 +58,4 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 addopts = "--import-mode=importlib"
-testpaths = ["packages/caspase-sdk/tests", "packages/caspase-control-plane/tests", "packages/caspase-hermes/tests"]
+testpaths = ["packages/hermeskill-sdk/tests", "packages/hermeskill-control-plane/tests", "packages/hermeskill-hermes/tests"]
