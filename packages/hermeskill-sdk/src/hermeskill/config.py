@@ -57,6 +57,11 @@ class SDKConfig(BaseModel):
     # control plane. On by default; set HERMESKILL_LOCAL_CERT=0 (or local_cert =
     # false in config.toml) to disable.
     local_cert: bool = True
+    # Write the live-vitals snapshot for `hermeskill monitor` on each hook tick
+    # (~/.hermeskill/live/). On by default; set HERMESKILL_LIVE=0 (or
+    # live_vitals = false in config.toml) to skip the per-tick file write
+    # entirely for agents that are never monitored.
+    live_vitals: bool = True
 
     @classmethod
     def load(cls) -> SDKConfig:
@@ -77,14 +82,11 @@ class SDKConfig(BaseModel):
             data["policy"] = env_policy
         if env_name := os.environ.get("HERMESKILL_AGENT_NAME"):
             data["agent_name"] = env_name
+        _falsey = {"0", "false", "no", "off", ""}
         if (env_cert := os.environ.get("HERMESKILL_LOCAL_CERT")) is not None:
-            data["local_cert"] = env_cert.strip().lower() not in {
-                "0",
-                "false",
-                "no",
-                "off",
-                "",
-            }
+            data["local_cert"] = env_cert.strip().lower() not in _falsey
+        if (env_live := os.environ.get("HERMESKILL_LIVE")) is not None:
+            data["live_vitals"] = env_live.strip().lower() not in _falsey
         return cls.model_validate(data)
 
 
@@ -114,6 +116,8 @@ def save_config(config: SDKConfig, *, force: bool = False) -> Path:
     # Only persist when overriding the default (True) — keeps the file minimal.
     if not config.local_cert:
         lines.append("local_cert = false")
+    if not config.live_vitals:
+        lines.append("live_vitals = false")
     CONFIG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         CONFIG_PATH.chmod(0o600)

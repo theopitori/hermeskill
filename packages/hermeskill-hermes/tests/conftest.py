@@ -1,13 +1,26 @@
 """Shared fixtures for hermeskill-hermes tests."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from hermeskill import certificate, vitals
 from hermeskill.policies import resolve_policy
 from hermeskill.types import Policy, PolicyThresholds
 from hermeskill.watcher import WatcherState
+
+
+@pytest.fixture(autouse=True)
+def _isolate_hermeskill_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Redirect the live-vitals and death-cert directories into a tmp path so
+    the plugin's best-effort file writes (snapshots, certs) never touch the
+    developer's real ``~/.hermeskill`` during the test run."""
+    monkeypatch.setattr(vitals, "LIVE_DIR", tmp_path / "live")
+    monkeypatch.setattr(certificate, "KILLS_DIR", tmp_path / "kills")
 
 
 def make_state(policy: Policy | None = None) -> WatcherState:

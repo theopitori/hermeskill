@@ -318,7 +318,8 @@ hermeskill init --api-key sk-... --base-url https://...  # write ~/.hermeskill/c
 hermeskill fleet                                # active agents + status (hides terminal)
 hermeskill fleet --all                          # include terminated/zombie agents
 hermeskill fleet --status terminated            # only agents in one status
-hermeskill logs <agent_id>                      # tail events
+hermeskill logs <agent_id>                      # tail events (control plane)
+hermeskill monitor                              # live vitals pane; flatlines on apoptosis (keyless, no server)
 hermeskill kill <agent_id> --reason "loop"      # manual kill with worst-case latency banner
 hermeskill rm <agent_id>                        # delete one agent + its history (operator)
 hermeskill prune                                # bulk-delete terminated agents (operator)

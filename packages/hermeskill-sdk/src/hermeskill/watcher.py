@@ -146,6 +146,12 @@ class WatcherState:
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0
 
+    # Lifetime tool-call count — incremented on every `record_tool_call`.
+    # The loop ring buffer is bounded (maxlen = loop_window_actions), so it
+    # can't be used as a running total; this is the unbounded counter the
+    # live vitals snapshot reports.
+    tool_call_count: int = 0
+
     # Active grants (M5 populates from heartbeat response).
     grants: list[dict[str, Any]] = field(default_factory=list)
 
@@ -179,6 +185,7 @@ class WatcherState:
     def record_tool_call(self, tool_name: str, params: Any) -> None:
         """Append a tool_call event + update loop ring buffer."""
         sig = _signature(tool_name, params)
+        self.tool_call_count += 1
         self.loop_signatures.append(sig)
         self._enqueue(
             EventIn(

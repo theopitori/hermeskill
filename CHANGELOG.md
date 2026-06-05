@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **`hermeskill monitor` — live agent vitals in your terminal.** The real-time
+  counterpart to the death certificate: run it in a second terminal beside
+  `hermes chat` and watch the agent's vitals tick — cost climbing toward the cap,
+  loop-pressure gauge filling, wall-clock advancing — then, when apoptosis fires,
+  the panel goes red and **flatlines** with the kill reason and (when
+  `local_cert` is on) the death certificate spliced in. Works with **no control
+  plane and no API key**: the Hermes plugin writes a small vitals snapshot to
+  `~/.hermeskill/live/<agent_id>.json` on every hook boundary (best-effort,
+  fail-open; disable with `HERMESKILL_LIVE=0`), and the monitor tails it. It's the keyless sibling of
+  `hermeskill logs --follow`. New `hermeskill.vitals` module owns the snapshot
+  schema + atomic read/write; `bridge.py` stays pure (the producer lives in the
+  plugin). The loop-pressure gauge reuses `check_loop`'s exact count, so it can
+  never disagree with the trigger.
 - **Removed the offline demo** — the `demo/` package (`python -m demo` and its scenarios), its smoke tests, the `demo.tape`/GIF tooling, and the SQLite "Try it" walkthrough are gone. They were scaffolding to exercise the engine without a real agent and were never meant to ship; Hermeskill's value is supervising a real Hermes session. The control-plane section now documents the real Postgres boot, and [docs/real-kill.md](docs/real-kill.md) is the verbatim proof. The `python -m demo…` reference under 0.1.0a0 below no longer applies.
 
 ## 0.1.0a1 (2026-05-31)

@@ -18,10 +18,15 @@ import asyncio
 import contextlib
 import sys
 import time
+from datetime import UTC, datetime
+from uuid import UUID
 
 import typer
-from rich.console import Console
+from rich.console import Console, Group, RenderableType
+from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from hermeskill._version import __version__
 from hermeskill.client import (
@@ -40,6 +45,13 @@ from hermeskill.types import (
     EventOut,
     EventType,
     SymptomType,
+)
+from hermeskill.vitals import (
+    DEFAULT_MAX_AGE_SECONDS,
+    VitalsSnapshot,
+    iter_live_snapshots,
+    read_snapshot,
+    snapshot_path,
 )
 
 # Windows consoles default to the cp1252 code page, which cannot encode the
@@ -516,6 +528,259 @@ def _print_event(ev: EventOut) -> None:
             console.print(f"[dim]{ts}[/dim] {ev.type.value} {ev.payload}")
 
 
+# --- monitor (live vitals; keyless, file-backed) -------------------------
+
+_PULSE_WIDTH = 28
+
+
+@app.command()
+def monitor(
+    agent_id: str | None = typer.Argument(
+        None, help="Agent UUID to watch. Omit to follow the freshest live agent."
+    ),
+    interval: float = typer.Option(
+        0.5, "--interval", min=0.05, max=5.0, help="Repaint interval in seconds."
+    ),
+    once: bool = typer.Option(
+        False, "--once", help="Render a single frame and exit (no live loop)."
+    ),
+) -> None:
+    """Live agent vitals — the real-time counterpart to the death certificate.
+
+    Reads the local vitals file the Hermes plugin writes each tick
+    (``~/.hermeskill/live/``). Works with **no control plane and no API key** —
+    the keyless sibling of ``hermeskill logs --follow``. Run it in a second
+    terminal beside ``hermes chat``: watch cost climb and loop pressure build,
+    then — the instant apoptosis fires — the panel goes red and flatlines.
+
+    Ctrl+C to stop.
+    """
+    target: UUID | None = None
+    if agent_id is not None:
+        try:
+            target = UUID(agent_id)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"not a valid agent UUID: {agent_id!r}"
+            ) from exc
+
+    if once:
+        console.print(_render_vitals(_load_snapshot(target)))
+        return
+
+    # Anchor the session at launch. In auto-follow (no id) we ignore deaths
+    # that happened *before* we started watching — otherwise a leftover
+    # terminated file from a previous run would render a flatline and the loop
+    # would exit instantly, before the agent we actually want to watch starts.
+    since = datetime.now(UTC)
+    with (
+        Live(
+            _render_vitals(_load_snapshot(target, since=since)),
+            console=console,
+            refresh_per_second=4,
+            screen=False,
+        ) as live,
+        contextlib.suppress(KeyboardInterrupt),
+    ):
+        while True:
+            snap = _load_snapshot(target, since=since)
+            live.update(_render_vitals(snap))
+            # A terminal snapshot is the last word — freeze the final frame
+            # (flatline / ended) on screen and stop polling.
+            if snap is not None and snap.status in ("terminated", "ended_clean"):
+                break
+            time.sleep(interval)
+
+
+def _load_snapshot(
+    target: UUID | None, *, since: datetime | None = None
+) -> VitalsSnapshot | None:
+    """Read the watched agent's snapshot, or the freshest live one if no id.
+
+    With an explicit ``target``, the caller asked for a specific agent — return
+    its snapshot whatever its state. In auto mode (no id), ``since`` filters out
+    terminal snapshots that predate the watch so a stale corpse from a previous
+    run can't hijack the pane.
+    """
+    if target is not None:
+        return read_snapshot(snapshot_path(target))
+    snaps = iter_live_snapshots()
+    if since is not None:
+        snaps = [
+            s
+            for s in snaps
+            if not (
+                s.status in ("terminated", "ended_clean") and s.written_at < since
+            )
+        ]
+    return snaps[0] if snaps else None
+
+
+def _mode(snap: VitalsSnapshot) -> str:
+    return "local-only" if snap.offline else "control-plane"
+
+
+def _bar(ratio: float, width: int = 24) -> tuple[str, str]:
+    """A proportional bar + a colour that reddens as the ratio nears the cap."""
+    ratio = max(0.0, min(1.0, ratio))
+    filled = round(ratio * width)
+    bar = "█" * filled + "░" * (width - filled)
+    if ratio >= 0.85:
+        color = "red"
+    elif ratio >= 0.6:
+        color = "yellow"
+    else:
+        color = "green"
+    return bar, color
+
+
+def _gauge(label: str, ratio: float, value: str) -> Text:
+    bar, color = _bar(ratio)
+    t = Text()
+    t.append(f"{label:<6} ", style="dim")
+    t.append(bar, style=color)
+    t.append(f"  {value}", style=color)
+    return t
+
+
+def _pulse(color: str) -> Text:
+    """A moving spike over a baseline — the ECG line while the agent is alive."""
+    pos = int(time.monotonic() * 8) % _PULSE_WIDTH
+    chars = ["─"] * _PULSE_WIDTH
+    chars[pos] = "╿"
+    return Text("".join(chars), style=color)
+
+
+def _render_vitals(snap: VitalsSnapshot | None) -> RenderableType:
+    now = datetime.now(UTC)
+    if snap is None:
+        return Panel(
+            Text(
+                "waiting for a live agent…\n"
+                "start `hermes chat` with the hermeskill plugin enabled.",
+                style="dim",
+            ),
+            title="hermeskill monitor",
+            border_style="dim",
+        )
+    if snap.status == "terminated":
+        return _render_flatline(snap)
+    if snap.status == "ended_clean":
+        return _render_ended(snap)
+    age = (now - snap.written_at).total_seconds()
+    if age > DEFAULT_MAX_AGE_SECONDS:
+        return _render_no_signal(snap, age)
+    return _render_running(snap, age)
+
+
+def _render_running(snap: VitalsSnapshot, age: float) -> RenderableType:
+    # Extrapolate uptime from the last write so the clock ticks smoothly
+    # between agent actions and the time gauge lines up with check_wall_clock.
+    uptime = snap.uptime_seconds + max(0.0, age)
+    cost_ratio = (
+        snap.total_cost_usd / snap.max_cost_usd if snap.max_cost_usd > 0 else 0.0
+    )
+    loop_ratio = (
+        snap.loop_peak / snap.max_loop_repeats if snap.max_loop_repeats > 0 else 0.0
+    )
+    time_ratio = (
+        uptime / snap.max_runtime_seconds if snap.max_runtime_seconds > 0 else 0.0
+    )
+    tokens = snap.total_input_tokens + snap.total_output_tokens
+    body = Group(
+        _pulse("green"),
+        Text(""),
+        _gauge(
+            "cost",
+            cost_ratio,
+            f"${snap.total_cost_usd:.4f} / ${snap.max_cost_usd:.2f}",
+        ),
+        _gauge(
+            "loop",
+            loop_ratio,
+            f"{snap.loop_peak} / {snap.max_loop_repeats} repeats",
+        ),
+        _gauge("time", time_ratio, f"{uptime:.0f}s / {snap.max_runtime_seconds}s"),
+        Text(""),
+        Text(
+            f"tools {snap.tool_calls}   ·   "
+            f"tokens {tokens:,} "
+            f"({snap.total_input_tokens:,} in / {snap.total_output_tokens:,} out)",
+            style="dim",
+        ),
+    )
+    return Panel(
+        body,
+        title=f"[bold green]● ALIVE[/bold green]  {snap.name}",
+        subtitle=f"[dim]policy {snap.policy_name} · {_mode(snap)}[/dim]",
+        border_style="green",
+    )
+
+
+def _render_flatline(snap: VitalsSnapshot) -> RenderableType:
+    items: list[RenderableType] = [
+        Text("─" * _PULSE_WIDTH, style="bold red"),
+        Text(""),
+        Text(f"reason  {snap.terminate_reason or 'terminated'}", style="bold red"),
+    ]
+    if snap.recent_symptoms:
+        items.append(Text(""))
+        items.append(Text("symptoms", style="dim"))
+        for s in snap.recent_symptoms:
+            sym = s.get("symptom", "?")
+            sev = s.get("severity", "?")
+            reason = s.get("reason", "")
+            style = "red" if sev == "terminal" else "yellow"
+            items.append(Text(f"  • {sym} ({sev})  {reason}", style=style))
+    if snap.certificate_text:
+        items.append(Text(""))
+        items.append(Text(snap.certificate_text, style="dim"))
+    return Panel(
+        Group(*items),
+        title=f"[bold red]† FLATLINE[/bold red]  {snap.name}",
+        subtitle=f"[dim]policy {snap.policy_name} · {_mode(snap)}[/dim]",
+        border_style="red",
+    )
+
+
+def _render_ended(snap: VitalsSnapshot) -> RenderableType:
+    tokens = snap.total_input_tokens + snap.total_output_tokens
+    body = Group(
+        Text("session ended cleanly — no apoptosis.", style="green"),
+        Text(""),
+        Text(
+            f"uptime {snap.uptime_seconds:.0f}s   ·   tools {snap.tool_calls}   ·   "
+            f"${snap.total_cost_usd:.4f}   ·   tokens {tokens:,}",
+            style="dim",
+        ),
+    )
+    return Panel(
+        body,
+        title=f"[bold]■ ENDED[/bold]  {snap.name}",
+        subtitle=f"[dim]policy {snap.policy_name}[/dim]",
+        border_style="blue",
+    )
+
+
+def _render_no_signal(snap: VitalsSnapshot, age: float) -> RenderableType:
+    body = Group(
+        Text("─" * _PULSE_WIDTH, style="dim"),
+        Text(""),
+        Text(f"no signal — last update {age:.0f}s ago.", style="bold yellow"),
+        Text(
+            "the agent process may have crashed or been killed without a clean "
+            "shutdown.",
+            style="dim",
+        ),
+    )
+    return Panel(
+        body,
+        title=f"[bold yellow]… NO SIGNAL[/bold yellow]  {snap.name}",
+        subtitle=f"[dim]policy {snap.policy_name}[/dim]",
+        border_style="yellow",
+    )
+
+
 # --- calibrate (Phase 4) -------------------------------------------------
 
 
@@ -879,4 +1144,12 @@ if __name__ == "__main__":
 
 
 # Re-export for tests that want to inspect the Typer app.
-__all__ = ["_fleet", "_logs", "_print_event", "_render_fleet", "app"]
+__all__ = [
+    "_fleet",
+    "_logs",
+    "_print_event",
+    "_render_fleet",
+    "_render_vitals",
+    "app",
+    "monitor",
+]

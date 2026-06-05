@@ -76,6 +76,13 @@ from hermeskill.certificate import render_certificate, save_certificate
 from hermeskill.client import HermeskillClient, TransportError
 from hermeskill.policies import resolve_policy
 from hermeskill.types import Policy
+from hermeskill.vitals import (
+    Status,
+    delete_snapshot,
+    snapshot_from_state,
+    sweep_live_dir,
+    write_snapshot,
+)
 from hermeskill.watcher import (
     BackgroundWorker,
     KillPendingPoller,
@@ -163,6 +170,7 @@ class HermeskillPlugin:
         client: HermeskillClient,
         forced_offline: bool = False,
         local_cert: bool = True,
+        live_vitals: bool = True,
     ) -> None:
         self._client = client
         self._name = name
@@ -176,6 +184,8 @@ class HermeskillPlugin:
         self._forced_offline = forced_offline
         # local_cert: render + save the death certificate locally on a kill.
         self._local_cert = local_cert
+        # live_vitals: write the per-tick snapshot for `hermeskill monitor`.
+        self._live_vitals = live_vitals
 
     def start(self) -> None:
         """Synchronous entry point used by Hermes' ``register()``.
@@ -229,6 +239,11 @@ class HermeskillPlugin:
         # (hard SIGTERM→SIGKILL) is the escape hatch for an agent wedged in
         # CPU-bound/sync code. `state.watchdog` stays None.
         register_watcher(state)
+        # Clear this id's file (belt-and-suspenders; ids are per-session) and
+        # sweep long-dead files from prior sessions so the live dir doesn't
+        # accumulate — and so `hermeskill monitor` isn't shown a stale corpse.
+        delete_snapshot(state.agent_id)
+        sweep_live_dir()
         # The background worker + kill poller only talk to the control plane
         # (heartbeats, event drain, manual-kill delivery). Offline they can
         # never succeed and would log a connection-refused traceback every
@@ -241,6 +256,9 @@ class HermeskillPlugin:
         state.record_lifecycle(
             "registered", agent_id=str(state.agent_id), offline=offline
         )
+        # Emit the first snapshot immediately so `hermeskill monitor` shows the
+        # agent the moment it registers, before the first tool/LLM boundary.
+        self._write_vitals()
         if offline:
             logger.warning(
                 "hermeskill: control plane unreachable; watching %r in LOCAL-ONLY "
@@ -307,6 +325,7 @@ class HermeskillPlugin:
         # Run checks (loop / cost / wall-clock / scope). If any fires Terminal,
         # state.terminate_requested flips inside bridge.on_pre_tool_call.
         on_pre_tool_call(self._state, tool_name, args)
+        self._write_vitals()
 
         if self._state.terminate_requested:
             return self._block_directive(
@@ -319,6 +338,7 @@ class HermeskillPlugin:
         if self._state is None:
             return
         on_post_tool_call(self._state, tool_name, args, result)
+        self._write_vitals()
         # If kill became armed during the tool, the next pre_tool_call will
         # block. No additional escalation needed here.
 
@@ -326,6 +346,7 @@ class HermeskillPlugin:
         if self._state is None:
             return
         on_pre_llm_call(self._state, model)
+        self._write_vitals()
 
     def post_api_request(
         self,
@@ -337,6 +358,7 @@ class HermeskillPlugin:
             return
         input_tokens, output_tokens = _extract_token_counts(usage)
         on_post_api_request(self._state, model, input_tokens, output_tokens)
+        self._write_vitals()
 
     def session_end(self) -> None:
         if self._state is None:
@@ -354,12 +376,23 @@ class HermeskillPlugin:
         # 1. Death certificate. Render + save it locally on every kill (the
         #    autopsy is delivered even with no control plane); additionally
         #    POST it for archival only when online.
+        cert_text: str | None = None
         if self._state.terminate_requested:
             if self._local_cert:
-                self._emit_local_cert()
+                cert_text = self._emit_local_cert()
             if not self._state.offline:
                 with contextlib.suppress(Exception):
                     loop_thread.run(self._post_death_cert_best_effort(), timeout=35.0)
+
+        # 1b. Terminal vitals snapshot — the centerpiece of `hermeskill monitor`.
+        #     Writing it here (rather than letting the monitor glob for the cert)
+        #     ends the flatline race and gives the monitor the one reliable
+        #     "dead vs. just finished" signal: `session_end` fires on both, so
+        #     only `status` discriminates. `cert_text` is a bonus splice.
+        terminal_status: Status = (
+            "terminated" if self._state.terminate_requested else "ended_clean"
+        )
+        self._write_vitals(status=terminal_status, certificate_text=cert_text)
 
         # 2. Stop the worker. Its final drain flushes every queued event
         #    (tool calls, symptoms, session_end). Stop BEFORE unregistering so
@@ -399,12 +432,14 @@ class HermeskillPlugin:
 
     # --- local death cert ----------------------------------------------------
 
-    def _emit_local_cert(self) -> None:
+    def _emit_local_cert(self) -> str | None:
         """Render the death certificate to stderr and save it under
-        ``~/.hermeskill/kills/``. Synchronous and best-effort — a rendering hiccup
-        must never escape a Hermes hook."""
+        ``~/.hermeskill/kills/``. Returns the rendered cert text (so the caller can
+        splice it into the live-vitals snapshot) or ``None`` if rendering failed.
+        Synchronous and best-effort — a rendering hiccup must never escape a
+        Hermes hook."""
         if self._state is None:
-            return
+            return None
         # Windows consoles default to cp1252, which can't encode the cert's
         # box-drawing glyphs. Reconfigure stderr to UTF-8 (best-effort, with
         # replacement) so the write never raises — same guard the CLI uses.
@@ -415,14 +450,15 @@ class HermeskillPlugin:
         try:
             cert = build_death_certificate(self._state)
             cost_line = _format_cost_line(self._state)
-            sys.stderr.write("\n" + render_certificate(cert, cost_line=cost_line) + "\n")
+            cert_text = render_certificate(cert, cost_line=cost_line)
+            sys.stderr.write("\n" + cert_text + "\n")
             sys.stderr.flush()
         except Exception:
             logger.exception(
                 "hermeskill: failed to render death certificate for agent %s",
                 self._state.agent_id,
             )
-            return
+            return None
         try:
             path = save_certificate(cert, cost_line=cost_line)
             sys.stderr.write(f"hermeskill: death certificate saved to {path}\n")
@@ -431,6 +467,25 @@ class HermeskillPlugin:
             logger.exception(
                 "hermeskill: failed to save death certificate for agent %s",
                 self._state.agent_id,
+            )
+        return cert_text
+
+    # --- live vitals ---------------------------------------------------------
+
+    def _write_vitals(
+        self, status: Status = "running", certificate_text: str | None = None
+    ) -> None:
+        """Write the live-vitals snapshot for `hermeskill monitor`. Best-effort:
+        a vitals hiccup must never escape a Hermes hook (same contract as
+        :meth:`_emit_local_cert`), so every failure is swallowed. Skipped
+        entirely when live vitals are disabled (``HERMESKILL_LIVE=0``)."""
+        if self._state is None or not self._live_vitals:
+            return
+        with contextlib.suppress(Exception):
+            write_snapshot(
+                snapshot_from_state(
+                    self._state, status=status, certificate_text=certificate_text
+                )
             )
 
     # --- death cert posting --------------------------------------------------

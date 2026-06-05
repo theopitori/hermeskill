@@ -798,3 +798,184 @@ def test_doctor_hermes_not_importable_exits_1(monkeypatch: pytest.MonkeyPatch) -
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1
     assert "NOT importable" in result.stdout
+
+
+# --- monitor (live vitals; --once renders one frame) ---------------------
+
+
+def _write_live(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, snap: Any) -> Any:
+    """Redirect the live dir into tmp and drop a snapshot there."""
+    from hermeskill import vitals
+
+    live_dir = tmp_path / "live"
+    monkeypatch.setattr(vitals, "LIVE_DIR", live_dir)
+    return vitals.write_snapshot(snap, directory=live_dir)
+
+
+def _running_snapshot(**overrides: Any) -> Any:
+    from uuid import uuid4
+
+    from hermeskill.vitals import VitalsSnapshot
+
+    base: dict[str, Any] = dict(
+        agent_id=uuid4(),
+        name="demo-agent",
+        policy_name="strict",
+        offline=True,
+        status="running",
+        uptime_seconds=12.0,
+        tool_calls=3,
+        total_cost_usd=0.5,
+        max_cost_usd=2.0,
+        loop_peak=2,
+        max_loop_repeats=5,
+        max_runtime_seconds=300,
+    )
+    base.update(overrides)
+    return VitalsSnapshot(**base)
+
+
+def test_monitor_once_renders_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    snap = _running_snapshot()
+    _write_live(monkeypatch, tmp_path, snap)
+    result = runner.invoke(app, ["monitor", str(snap.agent_id), "--once"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "ALIVE" in out
+    assert "demo-agent" in out
+    assert "cost" in out and "loop" in out
+
+
+def test_monitor_once_renders_flatline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    snap = _running_snapshot(
+        status="terminated",
+        terminate_reason="token_runaway: $2.41 ≥ cap $2.00",
+        recent_symptoms=[
+            {"symptom": "token_runaway", "severity": "terminal", "reason": "over cap"}
+        ],
+    )
+    _write_live(monkeypatch, tmp_path, snap)
+    result = runner.invoke(app, ["monitor", str(snap.agent_id), "--once"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "FLATLINE" in out
+    assert "token_runaway" in out
+
+
+def test_monitor_once_no_live_agents(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    from hermeskill import vitals
+
+    monkeypatch.setattr(vitals, "LIVE_DIR", tmp_path / "live")
+    result = runner.invoke(app, ["monitor", "--once"])
+    assert result.exit_code == 0
+    assert "waiting for a live agent" in result.stdout
+
+
+def test_monitor_rejects_bad_uuid() -> None:
+    result = runner.invoke(app, ["monitor", "not-a-uuid", "--once"])
+    assert result.exit_code != 0
+
+
+def test_load_snapshot_auto_ignores_stale_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Regression: a leftover terminated file from a previous run must not be
+    picked in auto-follow — otherwise the monitor flatlines on history and
+    exits before the agent we actually want to watch starts."""
+    from datetime import timedelta
+
+    snap = _running_snapshot(status="terminated", terminate_reason="yesterday's kill")
+    snap = snap.model_copy(
+        update={"written_at": datetime.now(UTC) - timedelta(hours=2)}
+    )
+    _write_live(monkeypatch, tmp_path, snap)
+
+    since = datetime.now(UTC)
+    # auto mode anchored at `since` → stale corpse ignored → wait (None)
+    assert cli_mod._load_snapshot(None, since=since) is None
+    # but a one-shot inspection (no anchor) still surfaces it
+    assert cli_mod._load_snapshot(None) is not None
+
+
+def test_load_snapshot_auto_keeps_fresh_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """A death that happens *during* the watch must still flatline + break."""
+    since = datetime.now(UTC)
+    snap = _running_snapshot(status="terminated", terminate_reason="fresh kill")
+    _write_live(monkeypatch, tmp_path, snap)  # written_at defaults to now (>= since)
+
+    picked = cli_mod._load_snapshot(None, since=since)
+    assert picked is not None
+    assert picked.status == "terminated"
+
+
+def test_monitor_follow_breaks_on_fresh_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """The real follow loop (not --once): a running agent that dies mid-watch
+    flips to terminated and the loop freezes on the flatline + exits."""
+    from hermeskill import vitals
+
+    live = tmp_path / "live"
+    monkeypatch.setattr(vitals, "LIVE_DIR", live)
+    snap = _running_snapshot()
+    vitals.write_snapshot(snap, directory=live)
+
+    calls = {"n": 0}
+
+    def fake_sleep(_s: float) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # The agent dies between the first and second poll.
+            vitals.write_snapshot(
+                snap.model_copy(
+                    update={"status": "terminated", "terminate_reason": "loop x5"}
+                ),
+                directory=live,
+            )
+        elif calls["n"] > 5:  # safety net so a regression can't hang the suite
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_mod.time, "sleep", fake_sleep)
+    result = runner.invoke(app, ["monitor", str(snap.agent_id), "--interval", "0.05"])
+    assert result.exit_code == 0, result.stdout
+    assert "FLATLINE" in result.stdout
+    assert calls["n"] == 1  # broke on the 2nd poll, right after the death
+
+
+def test_monitor_follow_auto_does_not_exit_on_stale_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Regression, end-to-end: with only a leftover terminated file present,
+    the auto-follow loop must keep waiting (not exit on the stale corpse)."""
+    from datetime import timedelta
+
+    from hermeskill import vitals
+
+    live = tmp_path / "live"
+    monkeypatch.setattr(vitals, "LIVE_DIR", live)
+    stale = _running_snapshot(status="terminated", terminate_reason="old").model_copy(
+        update={"written_at": datetime.now(UTC) - timedelta(hours=2)}
+    )
+    vitals.write_snapshot(stale, directory=live)
+
+    calls = {"n": 0}
+
+    def fake_sleep(_s: float) -> None:
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt  # stop the otherwise-correct infinite wait
+
+    monkeypatch.setattr(cli_mod.time, "sleep", fake_sleep)
+    result = runner.invoke(app, ["monitor", "--interval", "0.05"])
+    assert result.exit_code == 0, result.stdout
+    # If the bug were present it'd break on poll 1 and never sleep (n == 0).
+    assert calls["n"] >= 2
+    assert "waiting for a live agent" in result.stdout

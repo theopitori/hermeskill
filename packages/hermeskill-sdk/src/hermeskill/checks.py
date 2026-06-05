@@ -85,6 +85,22 @@ HEALTHY: Final[Healthy] = Healthy()
 # --- the checks -----------------------------------------------------------
 
 
+def loop_peak(state: WatcherState) -> tuple[str | None, int]:
+    """Most-repeated signature in the loop ring buffer and its count.
+
+    The single source of truth for "how close is this agent to the loop
+    cap?" — `check_loop` uses it to decide the kill, and `vitals` uses it
+    to render the loop-pressure gauge, so the gauge can never disagree with
+    the trigger. Returns ``(None, 0)`` for an empty buffer.
+    """
+    if not state.loop_signatures:
+        return None, 0
+    # Counter.most_common(1) is O(n) where n = window size (≤ 40 even on
+    # the permissive policy). Plenty fast for the hot path.
+    most_common_sig, count = Counter(state.loop_signatures).most_common(1)[0]
+    return most_common_sig, count
+
+
 def check_loop(state: WatcherState, policy: Policy) -> CheckResult:
     """Loop detection: trigger if any signature appears ≥ `max_loop_repeats`
     times in the current ring-buffer window.
@@ -100,9 +116,7 @@ def check_loop(state: WatcherState, policy: Policy) -> CheckResult:
     if not state.loop_signatures:
         return HEALTHY
     threshold = policy.thresholds.max_loop_repeats
-    # Counter.most_common(1) is O(n) where n = window size (≤ 40 even on
-    # the permissive policy). Plenty fast for the hot path.
-    most_common_sig, count = Counter(state.loop_signatures).most_common(1)[0]
+    most_common_sig, count = loop_peak(state)
     if count >= threshold:
         return Terminal(
             symptom=SymptomType.LOOP,
