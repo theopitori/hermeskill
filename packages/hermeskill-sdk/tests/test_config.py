@@ -27,6 +27,8 @@ def _isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         "HERMESKILL_BASE_URL",
         "HERMESKILL_POLICY",
         "HERMESKILL_AGENT_NAME",
+        "HERMESKILL_LOCAL_CERT",
+        "HERMESKILL_LIVE",
     ):
         monkeypatch.delenv(var, raising=False)
     yield cfg
@@ -92,6 +94,23 @@ def test_save_force_overwrites(_isolate_config: Path) -> None:
     save_config(SDKConfig(base_url=DEFAULT_BASE_URL, api_key="sk_first"))
     save_config(SDKConfig(base_url=DEFAULT_BASE_URL, api_key="sk_second"), force=True)
     assert SDKConfig.load().api_key == "sk_second"
+
+
+def test_live_vitals_defaults_on_env_can_disable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert SDKConfig.load().live_vitals is True
+    monkeypatch.setenv("HERMESKILL_LIVE", "0")
+    assert SDKConfig.load().live_vitals is False
+    monkeypatch.setenv("HERMESKILL_LIVE", "1")
+    assert SDKConfig.load().live_vitals is True
+
+
+def test_live_vitals_persists_when_disabled(_isolate_config: Path) -> None:
+    save_config(SDKConfig(base_url=DEFAULT_BASE_URL, api_key="sk_x", live_vitals=False))
+    text = _isolate_config.read_text(encoding="utf-8")
+    assert "live_vitals = false" in text
+    assert SDKConfig.load().live_vitals is False
 
 
 def test_save_quotes_backslashes_and_quotes(_isolate_config: Path) -> None:

@@ -38,6 +38,8 @@ Configuration (env vars or ``~/.hermes/.env``)
     HERMESKILL_POLICY       — policy name (default: "coding-default")
     HERMESKILL_LOCAL_CERT   — print/save the death cert locally on a kill
                            (default: on; set 0 to disable)
+    HERMESKILL_LIVE         — write the live-vitals snapshot each hook tick for
+                           `hermeskill monitor` (default: on; set 0 to disable)
 
 How it works
 ------------
@@ -110,6 +112,7 @@ def register(ctx: Any) -> None:
         client=client,
         forced_offline=keyless,
         local_cert=config.local_cert,
+        live_vitals=config.live_vitals,
     )
 
     # Run async setup on the plugin's own session loop thread. Hermes calls
@@ -144,6 +147,7 @@ async def async_register(ctx: Any) -> None:
         client=client,
         forced_offline=keyless,
         local_cert=config.local_cert,
+        live_vitals=config.live_vitals,
     )
     await plugin.astart()
 

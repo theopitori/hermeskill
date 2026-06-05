@@ -28,6 +28,7 @@ from hermeskill.checks import (
     check_loop,
     check_tool_scope,
     check_wall_clock,
+    loop_peak,
     run_all,
 )
 from hermeskill.policies import resolve_policy
@@ -98,6 +99,30 @@ def test_loop_healthy_below_threshold() -> None:
     for _ in range(4):  # 4 identical calls, threshold is 5
         s.record_tool_call("read_file", {"path": "a.txt"})
     assert check_loop(s, p) is HEALTHY
+
+
+def test_loop_peak_empty_buffer() -> None:
+    s = _state(_policy_with(max_loop_repeats=3))
+    assert loop_peak(s) == (None, 0)
+
+
+def test_loop_peak_matches_check_loop_trigger() -> None:
+    """`loop_peak` is the single source of truth check_loop derives its kill
+    from — the count it returns must equal the count in the Terminal's detail,
+    so the vitals gauge can never disagree with the trigger."""
+    p = _policy_with(max_loop_repeats=5, loop_window_actions=20)
+    s = _state(p)
+    for _ in range(5):
+        s.record_tool_call("read_file", {"path": "a.txt"})
+    s.record_tool_call("write_file", {"path": "b.txt"})  # noise
+
+    sig, count = loop_peak(s)
+    assert count == 5
+    assert sig is not None and "read_file" in sig
+    r = check_loop(s, p)
+    assert isinstance(r, Terminal)
+    assert r.detail["count"] == count
+    assert r.detail["signature"] == sig
 
 
 def test_loop_terminal_at_threshold() -> None:
