@@ -27,7 +27,11 @@ uv tool update-shell
 # 4. Enable the plugin (one shot — flips plugins.enabled in your Hermes config):
 hermeskill enable-hermes
 
-# 5. Run Hermes as usual. Hermeskill now watches every session:
+# 5. (Optional) Verify the wiring — checks Hermes is importable, the plugin is
+#    enabled, and prints the resolved mode/policy. Read-only, no network:
+hermeskill doctor
+
+# 6. Run Hermes as usual. Hermeskill now watches every session:
 hermes
 ```
 
@@ -64,27 +68,31 @@ it off and you still get the kill and the certificate.
 
 ## What the kill actually does
 
-Hermeskill's termination is **cooperative by default**, escalating through three
-layers:
+Hermeskill's termination is **cooperative by default**, with a hard-kill escape
+hatch:
 
-- **L1 — block directive.** On a terminal symptom the framework adapter returns
-  `{"action": "block", "message": "hermeskill apoptosis: …"}` on every subsequent
-  tool call. The agent is *asked* to stop; its loop winds down naturally.
-- **L2 — watchdog.** A per-agent daemon thread ([`apoptosis.py`](packages/hermeskill-sdk/src/hermeskill/apoptosis.py))
-  escalates after a grace window with `loop.call_soon_threadsafe(task.cancel)`,
-  cancelling the agent's asyncio **task** from outside its event loop.
-- **L3 — process supervisor (opt-in).** [`ProcessSupervisor`](packages/hermeskill-sdk/src/hermeskill/supervisor.py)
+- **L1 — block directive (the enforcing layer in Hermes).** On a terminal symptom
+  the framework adapter returns `{"action": "block", "message": "hermeskill
+  apoptosis: …"}` on every subsequent tool call. The agent is *asked* to stop, and
+  — crucially — no further tool runs, so the harm is halted immediately; the
+  agent's loop winds down at the next natural turn boundary.
+- **L2 — asyncio-task watchdog (does not apply to Hermes).** The SDK ships a
+  thread-based watchdog ([`apoptosis.py`](packages/hermeskill-sdk/src/hermeskill/apoptosis.py))
+  for adapters whose agent runs as a cancellable asyncio task. **Hermes' agent
+  loop is synchronous**, so there is no task to cancel — this layer is dormant in
+  the Hermes integration and L1 escalates straight to L3.
+- **L3 — process supervisor (opt-in hard kill).** [`ProcessSupervisor`](packages/hermeskill-sdk/src/hermeskill/supervisor.py)
   runs the agent in a **child process** and escalates **SIGTERM → grace →
   SIGKILL** from the parent. Because it lives in a separate process, it kills an
   agent the agent cannot veto.
 
-**The boundary, stated honestly.** L1/L2 cannot stop an agent wedged in
-CPU-bound or synchronous code — both rely on the event loop reaching an `await`,
-and they cancel a *task*, not an OS *process*. **L3 is the answer to exactly
-that case**, and it's the layer that makes "apoptosis" literally true. It's
-opt-in (the cooperative path stays the default for well-behaved agents), and on
-Windows `terminate()` is already a hard kill (there is no catchable SIGTERM), so
-the grace window applies on POSIX only.
+**The boundary, stated honestly.** L1 cannot stop an agent already wedged in
+CPU-bound or synchronous code *before* its next tool call — it works at tool
+boundaries, not mid-computation. **The process supervisor (L3) is the answer to
+exactly that case**, and it's the layer that makes "apoptosis" literally true.
+It's opt-in (the cooperative path stays the default for well-behaved agents), and
+on Windows `terminate()` is already a hard kill (there is no catchable SIGTERM),
+so the grace window applies on POSIX only.
 
 Whichever layer fires, the death certificate records the exact shutdown sequence
 (`supervisor_sigterm`, `supervisor_sigkill`, …) — the certificate is only as
@@ -305,6 +313,7 @@ Customers can also pass a custom `Policy` object via `policy=...` on the watch c
 
 ```bash
 hermeskill enable-hermes                        # add hermeskill to Hermes' plugins.enabled (one shot)
+hermeskill doctor                               # diagnose wiring + print resolved mode (read-only)
 hermeskill init --api-key sk-... --base-url https://...  # write ~/.hermeskill/config.toml once
 hermeskill fleet                                # active agents + status (hides terminal)
 hermeskill fleet --all                          # include terminated/zombie agents
@@ -328,7 +337,7 @@ hermeskill revoke <grant_id>                    # idempotent revoke
 ## What's in a death certificate
 
 - **Symptom log** — every check that fired, with detail payloads.
-- **Shutdown sequence** — L1 cooperative termination flag → L2 framework adapter returns Hermes' block directive (`{"action": "block", "message": "hermeskill apoptosis: <reason>"}`) on every subsequent tool call, halting further execution while the agent's loop winds down naturally.
+- **Shutdown sequence** — the termination flag is set, then the framework adapter returns Hermes' block directive (`{"action": "block", "message": "hermeskill apoptosis: <reason>"}`) on every subsequent tool call (L1, the enforcing layer), halting further execution while the agent's loop winds down naturally. If the process supervisor is in use, its `supervisor_sigterm` / `supervisor_sigkill` steps are recorded here too.
 - **Cost summary** — input/output tokens per model, USD.
 - **Tool signature window** — the last 20 tool calls with their argument hashes (this is what the loop check reads).
 - **Feedback URL** — one-click "this kill was right / wrong" so verdicts compound over time. Token is single-use, expires, and the hash is symmetric on both ends.
@@ -470,12 +479,13 @@ Hermes Agent is the supported runtime. Further directions are demand-driven
 The CLI ships in the `hermeskill` distribution (a transitive dep). Install via `uv tool install hermeskill` or `pipx install hermeskill` to get the CLI on your PATH, then keep the Hermes plugin install as documented above.
 
 **Hermeskill never activates — no `registered` event, no logs**
-The plugin isn't being discovered. Two usual causes: (1) `hermeskill` isn't in
-`plugins.enabled` in your Hermes config (see step 2 — and don't use `hermes
-plugins enable`, which only sees git-installed plugins); (2) `hermeskill-hermes`
-is installed in a different environment than the one Hermes runs from. A global
-Hermes uses its own isolated venv — install the plugin into *that* interpreter
-(see the install note under [Production install](#production-install)).
+Run `hermeskill doctor` first — it pinpoints which of the two usual causes you're
+hitting: (1) `hermeskill` isn't in `plugins.enabled` in your Hermes config (see
+step 4 — and don't use `hermes plugins enable`, which only sees git-installed
+plugins); (2) `hermeskill-hermes` is installed in a different environment than
+the one Hermes runs from. A global Hermes uses its own isolated venv — install
+the plugin into *that* interpreter (see the install note under
+[Production install](#production-install)).
 
 **Control plane returns 401 on every request**
 Double-check `HERMESKILL_API_KEY` against the row in `api_keys`. The middleware does a real hashed-key lookup — there is no stub key path.
@@ -487,7 +497,7 @@ Double-check `HERMESKILL_API_KEY` against the row in `api_keys`. The middleware 
 The control plane probes the pool with `SELECT 1` on every health check. 503 means the DSN is wrong or Postgres isn't reachable. Check `HERMESKILL_DB_URL` and the Postgres server.
 
 **Agent doesn't self-terminate after the cooperative-kill flag is set**
-`task.cancel()` only fires at the next `await`. Agents wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) won't notice the flag until they return to the event loop. Mitigation: run the agent in its own subprocess so a parent process can `SIGTERM`/`SIGKILL` it on timeout.
+The L1 block directive is enforced at *tool-call boundaries* — it prevents the next tool from running, but it can't interrupt an agent already wedged in synchronous code (a hung `subprocess.run`, CPU-bound parsing) before it reaches its next tool call. Mitigation: run the agent under the [process supervisor](packages/hermeskill-sdk/src/hermeskill/supervisor.py) so a parent process can `SIGTERM`/`SIGKILL` it on timeout regardless of where it's stuck.
 
 **`pytest` fails in `packages/hermeskill-control-plane/tests/`**
 The control-plane tests connect to a real Postgres via `HERMESKILL_DB_URL`. Either point at a dev DB (see `deploy/dev-db-bootstrap.ps1` / `deploy/setup.sh`) or scope the run with `uv run pytest packages/hermeskill-sdk/tests packages/hermeskill-hermes/tests`.
@@ -506,7 +516,6 @@ hermeskill/
 │   ├── setup.sh                      # Ubuntu VM bootstrap
 │   ├── dev-db-bootstrap.ps1          # Windows Postgres dev setup
 │   └── hermeskill-control-plane.service # systemd unit
-├── scripts/                          # one-off verification scripts
 ├── .github/workflows/                # CI (ruff + mypy + pytest)
 ├── pyproject.toml                    # uv workspace root
 ├── .python-version                   # Python interpreter pin for `uv`

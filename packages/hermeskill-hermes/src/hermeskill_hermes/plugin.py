@@ -69,7 +69,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from hermeskill.apoptosis import (
-    Watchdog,
     build_death_certificate,
     build_kill_event_payload,
 )
@@ -221,16 +220,20 @@ class HermeskillPlugin:
             policy=resolved_policy,
         )
         state.offline = offline
-        state.watchdog = Watchdog(
-            state,
-            grace_seconds=resolved_policy.thresholds.cooperative_grace_seconds,
-        )
+        # NB: no L2 watchdog is armed here. The SDK's `Watchdog` cancels the
+        # agent's *asyncio task* from outside its loop — but Hermes' agent loop
+        # is synchronous (it drives our hooks via plain `cb(**kwargs)` calls,
+        # see hermes_cli/plugins.py::invoke_hook) and exposes no cancellable
+        # task to arm against. So in the Hermes integration L1 (the cooperative
+        # block directive below) is the enforcing layer, and ProcessSupervisor
+        # (hard SIGTERM→SIGKILL) is the escape hatch for an agent wedged in
+        # CPU-bound/sync code. `state.watchdog` stays None.
         register_watcher(state)
         # The background worker + kill poller only talk to the control plane
         # (heartbeats, event drain, manual-kill delivery). Offline they can
         # never succeed and would log a connection-refused traceback every
-        # few seconds, so don't boot them. In-process symptom checks and the
-        # L2 watchdog run independently — the kill path is unaffected.
+        # few seconds, so don't boot them. In-process symptom checks run
+        # independently — the kill path (L1 cooperative block) is unaffected.
         if not offline:
             ensure_worker_started(self._client)
         self._state = state

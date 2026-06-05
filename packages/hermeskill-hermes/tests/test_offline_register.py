@@ -70,14 +70,18 @@ async def test_setup_falls_back_to_local_when_control_plane_unreachable() -> Non
     assert state is not None, "watcher must be built even when registration fails"
     assert state.offline is True
     assert isinstance(state.agent_id, UUID)
-    assert state.watchdog is not None
+    # No L2 watchdog is armed in the Hermes path — Hermes' agent loop is
+    # synchronous, so there's no asyncio task to cancel. L1 (the cooperative
+    # block directive) is what enforces; see test_offline_loop_detection_*.
+    assert state.watchdog is None
     # Registered in the process registry so a later (online) session's worker
     # could still see it.
     assert get_watcher(state.agent_id) is state
     # Worker is NOT booted offline: it only talks to the control plane
     # (heartbeats, event drain, kill poll), which can never succeed here and
-    # would log a connection-refused traceback every few seconds. Local symptom
-    # checks + the L2 watchdog run independently, so the kill path is intact.
+    # would log a connection-refused traceback every few seconds. In-process
+    # symptom checks run independently, so the kill path (L1 block) is intact —
+    # proven directly by test_offline_loop_detection_still_fires_and_blocks.
     worker.assert_not_called()
 
 

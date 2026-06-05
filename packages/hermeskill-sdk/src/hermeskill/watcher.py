@@ -102,9 +102,10 @@ class WatcherState:
 
     # Control-plane connectivity. True when the agent registered in
     # local-only mode because the control plane was unreachable at setup
-    # (see HermeskillPlugin.setup). In-process symptom checks still run and the
-    # L2 watchdog still enforces; only control-plane-backed features
-    # (operator visibility, manual kill, grants, death-cert archival) are
+    # (see HermeskillPlugin.setup). In-process symptom checks still run and
+    # the L1 cooperative block directive still enforces; only control-plane-
+    # backed features (operator visibility, manual kill, grants, death-cert
+    # archival) are
     # unavailable. The agent_id in this mode is a locally-minted UUID the
     # control plane has no record of.
     offline: bool = False
@@ -127,9 +128,13 @@ class WatcherState:
     # the flag directly.
     _terminate_event: threading.Event = field(default_factory=threading.Event)
 
-    # L2 watchdog (M2.4). Set by `watch()` after construction so the
-    # watcher knows the agent's policy grace seconds. May be None for
-    # synthetic test states that don't need a watchdog.
+    # L2 watchdog (M2.4) — an SDK primitive that cancels the agent's asyncio
+    # task from outside its loop. Only meaningful for a framework adapter that
+    # runs the agent as a cancellable asyncio task AND arms the watchdog with
+    # that loop+task. The Hermes adapter does NOT (Hermes' agent loop is
+    # synchronous), so this stays None in the Hermes integration; L1 enforces
+    # and ProcessSupervisor is the hard-kill escape hatch. Left here for the
+    # tested standalone primitive and any future async-task adapter.
     watchdog: Watchdog | None = None
 
     # Loop detection ring buffer. Sized from policy in __post_init__ — set

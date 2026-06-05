@@ -5,6 +5,7 @@ no live server is needed.
 """
 
 import json as _json
+import sys
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -14,6 +15,7 @@ import httpx
 import pytest
 from hermeskill.cli import app
 from hermeskill.client import HermeskillClient
+from hermeskill.config import SDKConfig
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -731,3 +733,68 @@ def test_init_force_overwrites(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -
     r2 = runner.invoke(app, ["init", "--api-key", "sk_second", "--force"])
     assert r2.exit_code == 0, r2.stdout
     assert 'api_key = "sk_second"' in cfg.read_text(encoding="utf-8")
+
+
+# --- doctor --------------------------------------------------------------
+
+
+def _patch_hermes_config(
+    monkeypatch: pytest.MonkeyPatch, *, enabled: list[str] | None
+) -> None:
+    """Make the in-function `from hermes_cli.config import ...` resolve to a
+    stub Hermes config. `enabled` is the plugins.enabled list (None → key
+    absent)."""
+    import hermes_cli.config as hcfg  # type: ignore[import-untyped]
+
+    plugins = {} if enabled is None else {"enabled": enabled}
+    monkeypatch.setattr(hcfg, "get_config_path", lambda: "/fake/hermes/config.yaml")
+    monkeypatch.setattr(hcfg, "load_config", lambda: {"plugins": plugins})
+
+
+def _patch_sdk_config(monkeypatch: pytest.MonkeyPatch, config: SDKConfig) -> None:
+    monkeypatch.setattr(cli_mod.SDKConfig, "load", classmethod(lambda cls: config))
+
+
+def test_doctor_control_plane_mode_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_hermes_config(monkeypatch, enabled=["hermeskill"])
+    _patch_sdk_config(
+        monkeypatch, SDKConfig(api_key="sk_test", policy="strict", agent_name="bot")
+    )
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.stdout
+    out = result.stdout
+    assert "Hermes Agent is importable" in out
+    assert "enabled in plugins.enabled" in out
+    assert "control-plane" in out
+    assert "strict" in out
+    assert "wiring looks good" in out
+
+
+def test_doctor_local_only_keyless_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_hermes_config(monkeypatch, enabled=["hermeskill"])
+    _patch_sdk_config(monkeypatch, SDKConfig(api_key=None))
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.stdout
+    assert "local-only" in result.stdout
+    # Keyless is a valid state, not a blocking problem.
+    assert "wiring looks good" in result.stdout
+
+
+def test_doctor_plugin_not_enabled_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_hermes_config(monkeypatch, enabled=["something_else"])
+    _patch_sdk_config(monkeypatch, SDKConfig(api_key="sk_test"))
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    out = result.stdout
+    assert "NOT in plugins.enabled" in out
+    assert "blocking problem" in out
+
+
+def test_doctor_hermes_not_importable_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Forcing the module to None makes `from hermes_cli.config import ...` raise
+    # ImportError without uninstalling anything.
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", None)
+    _patch_sdk_config(monkeypatch, SDKConfig(api_key="sk_test"))
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "NOT importable" in result.stdout
