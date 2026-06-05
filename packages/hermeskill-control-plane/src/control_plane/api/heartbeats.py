@@ -10,8 +10,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from hermeskill.types import EventType, HeartbeatIn, HeartbeatOut
 from fastapi import APIRouter, Depends, status
+from hermeskill.types import EventType, HeartbeatIn, HeartbeatOut
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from control_plane.api.agents import _load_agent_owned_by

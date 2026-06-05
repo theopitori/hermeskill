@@ -18,8 +18,8 @@ import httpx
 import pytest
 from hermeskill.client import (
     AuthError,
-    HermeskillClient,
     ConflictError,
+    HermeskillClient,
     NotFoundError,
     ServerError,
     TransportError,

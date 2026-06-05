@@ -30,8 +30,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from hermeskill.types import KillEventIn, KillEventOut
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from hermeskill.types import KillEventIn, KillEventOut
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

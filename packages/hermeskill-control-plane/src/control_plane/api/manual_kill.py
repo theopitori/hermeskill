@@ -17,8 +17,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from hermeskill.types import KillEventOut, PendingKillOut, TerminateAgentIn
 from fastapi import APIRouter, Depends, HTTPException, status
+from hermeskill.types import KillEventOut, PendingKillOut, TerminateAgentIn
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

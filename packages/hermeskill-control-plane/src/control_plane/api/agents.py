@@ -8,13 +8,13 @@ agents don't accumulate forever.
 from typing import Annotated
 from uuid import UUID, uuid4
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from hermeskill.types import (
     AgentRegistrationIn,
     AgentRegistrationOut,
     AgentStatus,
     AgentSummary,
 )
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,7 +157,7 @@ async def prune_agents(
 async def _cascade_delete_agents(session: AsyncSession, agent_ids: list[UUID]) -> None:
     """Delete agents and their dependents in FK order.
 
-    SQLite (used by the demo / in-process control plane) does not enforce
+    SQLite (used by the test suite) does not enforce
     `ON DELETE CASCADE` unless `PRAGMA foreign_keys=ON`, so we delete dependents
     explicitly rather than relying on the DB. Order: feedback_tokens (hang off
     kill_events) → kill_events → grants → events → agents.

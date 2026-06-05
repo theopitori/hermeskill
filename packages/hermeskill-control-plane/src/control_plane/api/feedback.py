@@ -21,8 +21,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from hermeskill.types import FeedbackIn, FeedbackOut
 from fastapi import APIRouter, Depends, HTTPException, status
+from hermeskill.types import FeedbackIn, FeedbackOut
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

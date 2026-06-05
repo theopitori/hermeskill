@@ -15,7 +15,7 @@ Why extract the symptom in Python and not SQL: the terminal symptom lives
 inside `death_certificate["symptoms_log"]` (the entry with
 `severity == "terminal"`), not in the scalar `trigger_type` column (that's
 auto/manual). The cert column is JSONB on Postgres but an affinity-patched JSON
-string on the SQLite test/demo path, so a JSON-path query wouldn't be portable.
+string on the SQLite test path, so a JSON-path query wouldn't be portable.
 We filter on the scalar columns in SQL and dig the symptom out in Python.
 """
 
@@ -23,10 +23,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends, HTTPException, status
 from hermeskill.calibration import LabeledKill, build_calibration_report
 from hermeskill.policies import UnknownPolicyError, resolve_policy
 from hermeskill.types import CalibrationReport, FeedbackLabel, SymptomType
-from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

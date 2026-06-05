@@ -10,8 +10,13 @@ policy allowlist.
 ## Install & enable (zero config)
 
 ```bash
-# Install the plugin into Hermes' environment:
-uv tool install hermes-agent --with hermeskill-hermes   # or: pip install hermeskill-hermes
+# Install Hermes with the Hermeskill plugin in its environment:
+uv tool install hermes-agent --with hermeskill-hermes
+
+# Install the Hermeskill CLI (`--with hermes-agent` lets enable-hermes read
+# Hermes' config), then put uv's tool dir on PATH and restart your shell:
+uv tool install hermeskill --with hermes-agent
+uv tool update-shell
 
 # Enable it (one shot — flips plugins.enabled in your Hermes config):
 hermeskill enable-hermes

@@ -1,7 +1,7 @@
 # Launch copy
 
 Ready-to-paste announcement text for Hermeskill. Not part of the package —
-delete or keep as you like. Swap the demo GIF/asciinema link once recorded.
+delete or keep as you like. Drop your kill GIF in where marked.
 
 ---
 
@@ -44,8 +44,8 @@ Design notes:
 - Policies are tiered (strict / coding-default / permissive) with loop, cost,
   and wall-clock caps you can override.
 
-Honest caveats: it's a 0.1 alpha, Hermes is the only supported runtime today
-(LangGraph and others are next), and in-process kills are cooperative —
+Honest caveats: it's a 0.1 alpha, Hermes is the supported runtime, and
+in-process kills are cooperative —
 an agent wedged in sync code won't notice until it hits the next await, so for
 untrusted/long-running agents you still want to run them in their own
 subprocess. The threat model and what it explicitly does NOT do are in
@@ -57,13 +57,13 @@ these five checks would miss?
 ```
 
 **First comment (post it yourself right after submitting):** a one-paragraph
-"why I built this" + the demo GIF link. HN rewards the author engaging early.
+"why I built this" + the kill GIF link. HN rewards the author engaging early.
 
 ---
 
 ## X / Twitter thread
 
-**1/ (lead with the autopsy, attach the demo GIF)**
+**1/ (lead with the autopsy, attach the kill GIF)**
 
 ```
 Your AI agent just spent $40 looping on the same tool call and nobody noticed.
@@ -73,7 +73,7 @@ agent the moment it goes runaway, and hands you a death certificate.
 
 pip install hermeskill-hermes
 
-[demo.gif]
+[kill.gif]
 ```
 
 **2/**
@@ -108,9 +108,9 @@ tokens, model id — reaches the control plane, which you run yourself.
 **5/ (CTA)**
 
 ```
-0.1 alpha. Hermes Agent today, more runtimes next.
+0.1 alpha. Built for Hermes Agent.
 
-Repo + 5-min demo: https://github.com/theopitori/hermeskill
+Repo + verbatim real kill: https://github.com/theopitori/hermeskill
 
 What runaway mode have you hit that these checks would've caught?
 ```

@@ -10,8 +10,8 @@ Read pagination supports two modes:
 from typing import Annotated
 from uuid import UUID
 
-from hermeskill.types import EventBatchIn, EventOut, EventPage, EventType
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from hermeskill.types import EventBatchIn, EventOut, EventPage, EventType
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -1,10 +1,8 @@
 # Killing a real Hermes agent (GPT-4o)
 
-The [`python -m demo`](offline-demo.md) showpiece is deterministic and offline
-on purpose — it proves the *engine* with no API key. This page is the other
-half: Hermeskill killing a **real**
+This page is Hermeskill killing a **real**
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) session driving
-GPT-4o, with nothing scripted. Same engine, real runtime, real model spend.
+GPT-4o, with nothing scripted — real runtime, real model spend.
 
 Everything below is a verbatim run. The only setup is a clone, `uv sync`,
 enabling the plugin, and four env vars.
@@ -104,10 +102,10 @@ PS> uv run hermeskill logs fa4ed569-4257-4377-81a3-4e44fda65982
 10:39:36 lifecycle session_end
 ```
 
-The `symptom loop (terminal)` line is the same verdict the offline demo
-produces — only here it fired against a live GPT-4o agent, with real token
-counts and real cost, and Hermeskill surfaced the block to Hermes as a tool error
-that ended the session cooperatively.
+The `symptom loop (terminal)` line is the engine's verdict — here it fired
+against a live GPT-4o agent, with real token counts and real cost, and
+Hermeskill surfaced the block to Hermes as a tool error that ended the session
+cooperatively.
 
 > Tested against `hermes-agent==0.14.0`. Hermeskill attaches via the standard
 > `hermes_agent.plugins` entry-point and the `pre_tool_call` block directive —

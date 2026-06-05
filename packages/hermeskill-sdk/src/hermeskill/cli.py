@@ -26,8 +26,8 @@ from rich.table import Table
 from hermeskill._version import __version__
 from hermeskill.client import (
     AuthError,
-    HermeskillClient,
     ConflictError,
+    HermeskillClient,
     NotFoundError,
     TransportError,
 )
