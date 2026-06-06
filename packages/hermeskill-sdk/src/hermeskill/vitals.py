@@ -88,6 +88,7 @@ class VitalsSnapshot(BaseModel):
 
     # counters
     tool_calls: int = 0
+    steer_count: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0
@@ -134,6 +135,7 @@ def snapshot_from_state(
         uptime_seconds=state.uptime_seconds(),
         written_at=datetime.now(UTC),
         tool_calls=state.tool_call_count,
+        steer_count=state.steer_count,
         total_input_tokens=state.total_input_tokens,
         total_output_tokens=state.total_output_tokens,
         total_cost_usd=state.total_cost_usd,

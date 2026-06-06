@@ -7,8 +7,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from hermeskill.apoptosis import build_death_certificate, build_kill_event_payload
 from hermeskill.certificate import render_certificate, save_certificate
-from hermeskill.types import DeathCertificate, ShutdownLogEntry, TriggerType
+from hermeskill.policies import resolve_policy
+from hermeskill.types import (
+    DeathCertificate,
+    KillEventIn,
+    ShutdownLogEntry,
+    SymptomType,
+    TriggerType,
+)
+from hermeskill.watcher import WatcherState
 
 
 def _cert() -> DeathCertificate:
@@ -29,6 +38,41 @@ def _cert() -> DeathCertificate:
         ],
         shutdown_log=[ShutdownLogEntry(step="apoptosis_requested", at=now)],
     )
+
+
+def test_steered_then_killed_cert_serializes_across_the_wire() -> None:
+    """Regression: a `severity="steer"` symptom must survive the *online*
+    serialization path. `symptoms_log` carries steer entries, and an online
+    steered-then-killed agent POSTs them inside the death cert. Severity is
+    free-form `str` end-to-end (no Literal/enum on DeathCertificate/KillEventIn),
+    so this must construct cleanly — if anyone tightens severity to an enum
+    without adding "steer", this fails instead of 500ing in production."""
+    state = WatcherState(
+        agent_id=uuid4(),
+        name="t",
+        policy=resolve_policy("coding-default"),
+    )
+    # Two steer nudges, then the kill — the real shape of a steered-then-killed
+    # agent's symptoms_log.
+    state.record_symptom(SymptomType.LOOP, "steer", "repeated 3x", {"count": 3})
+    state.record_symptom(SymptomType.LOOP, "steer", "repeated 4x", {"count": 4})
+    state.record_symptom(SymptomType.LOOP, "terminal", "repeated 5x", {"count": 5})
+    state.request_termination("loop: repeated 5x")
+
+    # Builds (and pydantic-validates) the full POST body — the online path.
+    payload = build_kill_event_payload(state)
+    assert isinstance(payload, KillEventIn)
+    severities = [s["severity"] for s in payload.death_certificate.symptoms_log]
+    assert severities == ["steer", "steer", "terminal"]
+
+    # And it round-trips through JSON like the client would send it.
+    KillEventIn.model_validate_json(payload.model_dump_json())
+
+    # The renderer tolerates the steer severity too (cosmetic, but check it).
+    cert = build_death_certificate(state)
+    rendered = render_certificate(cert)
+    assert "loop (steer)" in rendered
+    assert "loop (terminal)" in rendered
 
 
 def test_render_certificate_includes_key_fields() -> None:

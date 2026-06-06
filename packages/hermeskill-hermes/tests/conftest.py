@@ -34,6 +34,9 @@ def make_state(policy: Policy | None = None) -> WatcherState:
 def make_policy(**overrides: object) -> Policy:
     base = resolve_policy("coding-default")
     fields = base.thresholds.model_dump()
+    # Steering off by default so the legacy kill-path/bridge tests stay valid
+    # as pure-kill tests; steer tests pass `loop_steer_repeats=` explicitly.
+    fields["loop_steer_repeats"] = None
     fields.update(overrides)
     return base.model_copy(update={"thresholds": PolicyThresholds(**fields)})
 

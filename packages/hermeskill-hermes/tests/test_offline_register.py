@@ -129,9 +129,10 @@ async def test_offline_async_register_wires_all_five_hooks() -> None:
 
 
 async def test_offline_loop_detection_still_fires_and_blocks() -> None:
-    """coding-default fires loop at the 5th identical signature. The control
-    plane never saw this agent, yet the in-process check still arms the kill
-    and pre_tool_call returns Hermes' block directive."""
+    """coding-default steers at the 3rd/4th identical signature and kills at the
+    5th. The control plane never saw this agent, yet the in-process checks still
+    steer (block without killing) and finally arm the kill — all returning
+    Hermes' block directive."""
     plugin = HermeskillPlugin(name="t", policy="coding-default", client=_offline_client())
     with patch("hermeskill_hermes.plugin.ensure_worker_started"):
         await plugin.setup()
@@ -139,14 +140,24 @@ async def test_offline_loop_detection_still_fires_and_blocks() -> None:
     assert plugin._state is not None and plugin._state.offline is True
 
     args = {"path": "/tmp/loop"}
-    for _ in range(4):
-        assert plugin.pre_tool_call("read_file", args) is None
-    directive = plugin.pre_tool_call("read_file", args)  # 5th — loop fires
+    # Calls 1-2: below the steer band → tool proceeds.
+    assert plugin.pre_tool_call("read_file", args) is None
+    assert plugin.pre_tool_call("read_file", args) is None
+    # Calls 3-4: steer band → blocked, but agent stays alive.
+    for _ in range(2):
+        steer = plugin.pre_tool_call("read_file", args)
+        assert steer is not None
+        assert steer["action"] == "block"
+        assert "loop-steer" in steer["message"].lower()
+        assert not plugin._state.terminate_requested
+    # Call 5: kill cap → apoptosis.
+    directive = plugin.pre_tool_call("read_file", args)
 
     assert plugin._state.terminate_requested
+    assert plugin._state.steer_count == 2
     assert directive is not None
     assert directive["action"] == "block"
-    assert "hermeskill" in directive["message"].lower()
+    assert "apoptosis" in directive["message"].lower()
     # The agent is still locally tracked even though it's invisible to the CP.
     assert plugin._state in all_watchers()
 

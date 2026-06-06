@@ -128,6 +128,105 @@ def test_pre_tool_call_keeps_blocking_after_first_kill() -> None:
         assert directive["action"] == "block", f"tool {tool} should block"
 
 
+# --- loop steer (soft intervention) ------------------------------------------
+
+
+def _steer_plugin() -> tuple[HermeskillPlugin, WatcherState]:
+    """Plugin whose policy steers at 3 and kills at 5 (window 10)."""
+    base = resolve_policy("coding-default")
+    thresholds = base.thresholds.model_copy(
+        update={
+            "max_loop_repeats": 5,
+            "loop_steer_repeats": 3,
+            "loop_window_actions": 10,
+        }
+    )
+    policy = base.model_copy(update={"thresholds": thresholds})
+    state = WatcherState(agent_id=uuid4(), name="test", policy=policy)
+    plugin = HermeskillPlugin(name="test", policy="coding-default", client=MagicMock())
+    plugin._state = state
+    return plugin, state
+
+
+def test_pre_tool_call_steers_in_band_without_terminating() -> None:
+    """3rd identical call (steer threshold) returns a block directive, but the
+    agent is NOT terminated — the session continues."""
+    plugin, state = _steer_plugin()
+    args = {"path": "/tmp/loop"}
+    assert plugin.pre_tool_call("read_file", args) is None  # 1
+    assert plugin.pre_tool_call("read_file", args) is None  # 2
+    directive = plugin.pre_tool_call("read_file", args)  # 3 → steer
+
+    assert directive is not None
+    assert directive["action"] == "block"
+    assert "steer" in directive["message"].lower()
+    assert not state.terminate_requested
+    assert state.steer_count == 1
+
+
+def test_steer_directive_does_not_tell_agent_to_end_session() -> None:
+    """A steer should nudge a course-change, not a shutdown — unlike the kill
+    directive it must not instruct the agent to end the session."""
+    plugin, _state = _steer_plugin()
+    args = {"path": "/tmp/loop"}
+    for _ in range(2):
+        plugin.pre_tool_call("read_file", args)
+    directive = plugin.pre_tool_call("read_file", args)
+    assert directive is not None
+    msg = directive["message"].lower()
+    assert "change approach" in msg
+    assert "end the session" not in msg
+
+
+def test_steer_escalates_to_kill_at_cap() -> None:
+    """Persisting through the steer band lands on apoptosis at the kill cap."""
+    plugin, state = _steer_plugin()
+    args = {"path": "/tmp/loop"}
+    directives = [plugin.pre_tool_call("read_file", args) for _ in range(5)]
+    # 1,2 → None; 3,4 → steer (alive); 5 → kill.
+    assert directives[0] is None
+    assert directives[1] is None
+    assert directives[2] is not None and not _is_kill(directives[2])
+    assert directives[3] is not None and not _is_kill(directives[3])
+    assert directives[4] is not None and _is_kill(directives[4])
+    assert state.terminate_requested
+    assert state.steer_count == 2  # steered twice before the kill
+
+
+def test_steer_then_changed_approach_proceeds() -> None:
+    """After a steer, a different call proceeds (None) and the agent stays
+    alive — the recoverable path the whole feature exists for."""
+    plugin, state = _steer_plugin()
+    loop_args = {"path": "/tmp/loop"}
+    for _ in range(3):
+        plugin.pre_tool_call("read_file", loop_args)  # steers on the 3rd
+    assert state.steer_count == 1
+    # Agent obeys and does something different.
+    directive = plugin.pre_tool_call("write_file", {"path": "/tmp/new"})
+    assert directive is None
+    assert not state.terminate_requested
+
+
+def test_granted_loop_neither_steers_nor_kills() -> None:
+    """A live `loop` grant suppresses both the steer and the kill — a
+    legitimately-looping granted agent proceeds untouched."""
+    plugin, state = _steer_plugin()
+    state.grants = [
+        {"id": "g1", "symptoms": ["loop"], "reason": "intentional poll"}
+    ]
+    args = {"path": "/tmp/poll"}
+    # Push well past both the steer (3) and kill (5) thresholds.
+    for _ in range(8):
+        assert plugin.pre_tool_call("read_file", args) is None
+    assert not state.terminate_requested
+    assert state.steer_count == 0
+
+
+def _is_kill(directive: dict[str, str] | None) -> bool:
+    """A kill directive says 'apoptosis'; a steer says 'loop-steer'."""
+    return directive is not None and "apoptosis" in directive["message"].lower()
+
+
 # --- session_end death cert --------------------------------------------------
 
 

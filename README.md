@@ -286,7 +286,7 @@ uv run --package hermeskill-control-plane hermeskill-control-plane
 
 | Symptom | What triggers it |
 |---|---|
-| `loop` | Same tool called N× in a row with identical inputs (threshold per policy) |
+| `loop` | Same tool called N× in a row with identical inputs (threshold per policy) — **steers first, then kills** (see below) |
 | `token_runaway` | Cumulative LLM cost exceeds the policy cost cap |
 | `wall_clock` | Session runs longer than the policy wall-clock cap |
 | `tool_scope_violation` | Agent calls a tool not in the policy allowlist |
@@ -295,17 +295,19 @@ uv run --package hermeskill-control-plane hermeskill-control-plane
 
 On any terminal symptom Hermeskill requests a cooperative shutdown via the framework adapter; the SDK posts a death certificate with the full symptom log and a feedback URL.
 
+**Loop-steer (nudge before kill).** Loops are the one symptom an agent can recover from on its own, so loop detection is graduated. When the current tool call repeats up to `loop_steer_repeats` — below the kill cap `max_loop_repeats` — Hermeskill blocks just that call and feeds back a corrective **steer** message ("this looks like a loop; re-read the task, try a different tool or arguments") instead of terminating. If the agent changes approach, it proceeds immediately; if it keeps making the identical call, the count climbs to the kill cap and apoptosis fires. Steering keys off the *current* signature so a corrective call is never blocked. Set `loop_steer_repeats=None` on a policy to disable it (kill-only, the original behaviour). A live `loop` grant suppresses both the steer and the kill.
+
 ---
 
 ## Policies
 
 Shipped defaults live in the SDK:
 
-| Policy | Loop cap | Cost cap | Wall-clock cap | Grantable symptoms |
+| Policy | Loop steer → kill | Cost cap | Wall-clock cap | Grantable symptoms |
 |---|---|---|---|---|
-| `strict` | 3 repeats / 15 actions | $2.00 | 5 min | none |
-| `coding-default` | 5 repeats / 20 actions | $25.00 | 30 min | `tool_scope_violation` |
-| `permissive` | 10 repeats / 40 actions | $100.00 | 2 h | `tool_scope_violation`, `loop` |
+| `strict` | — / 3 repeats (15 actions) | $2.00 | 5 min | none |
+| `coding-default` | 3 → 5 repeats (20 actions) | $25.00 | 30 min | `tool_scope_violation` |
+| `permissive` | 5 → 10 repeats (40 actions) | $100.00 | 2 h | `tool_scope_violation`, `loop` |
 
 `strict` ships a tight tool allowlist (`read_file`, `search`) for untrusted code paths. `coding-default` is the recommended baseline for everyday coding agents. `permissive` opens the tool surface entirely (`tool_allowlist=[]` is treated as "any tool") and is meant for trusted internal agents under active operator supervision.
 

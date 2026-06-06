@@ -705,7 +705,8 @@ def _render_running(snap: VitalsSnapshot, age: float) -> RenderableType:
         Text(
             f"tools {snap.tool_calls}   ·   "
             f"tokens {tokens:,} "
-            f"({snap.total_input_tokens:,} in / {snap.total_output_tokens:,} out)",
+            f"({snap.total_input_tokens:,} in / {snap.total_output_tokens:,} out)"
+            + (f"   ·   steered {snap.steer_count}x" if snap.steer_count else ""),
             style="dim",
         ),
     )
@@ -730,7 +731,12 @@ def _render_flatline(snap: VitalsSnapshot) -> RenderableType:
             sym = s.get("symptom", "?")
             sev = s.get("severity", "?")
             reason = s.get("reason", "")
-            style = "red" if sev == "terminal" else "yellow"
+            if sev == "terminal":
+                style = "red"
+            elif sev == "steer":
+                style = "cyan"
+            else:
+                style = "yellow"
             items.append(Text(f"  • {sym} ({sev})  {reason}", style=style))
     if snap.certificate_text:
         items.append(Text(""))

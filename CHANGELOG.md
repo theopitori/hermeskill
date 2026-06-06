@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Loop-steer — nudge before you kill.** Loop detection is now graduated: when
+  the *current* tool call repeats up to `loop_steer_repeats` (below the kill cap
+  `max_loop_repeats`), Hermeskill blocks that one call and injects a corrective
+  **steer** message — "this looks like a loop; change approach" — instead of
+  terminating. The agent gets a chance to recover on its own; if it keeps making
+  the identical call, the count climbs to the kill threshold and apoptosis fires
+  as before. Steering keys off the *current* signature (not the window peak), so
+  the moment the agent switches to a different call it sails through immediately.
+  Enabled by default on `coding-default` (steer at 3, kill at 5) and `permissive`
+  (steer at 5, kill at 10); `strict` stays kill-only. Set `loop_steer_repeats` in
+  a policy to tune, or `None` to disable (restores the original binary behaviour).
+  Steers are recorded as `severity="steer"` symptom events, counted in the live
+  vitals snapshot (`steered Nx` in `hermeskill monitor`), and an active loop grant
+  suppresses both the kill and the steer. Delivered through the same canonical
+  `pre_tool_call` block directive as the kill — no new glue.
 - **`hermeskill monitor` — live agent vitals in your terminal.** The real-time
   counterpart to the death certificate: run it in a second terminal beside
   `hermes chat` and watch the agent's vitals tick — cost climbing toward the cap,

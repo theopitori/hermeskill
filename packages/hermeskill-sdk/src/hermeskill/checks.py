@@ -75,7 +75,30 @@ class Terminal:
     detail: dict[str, Any] = field(default_factory=dict)
 
 
-CheckResult = Healthy | Warning | Terminal
+@dataclass(frozen=True, slots=True)
+class Steer:
+    """A *soft* intervention: a symptom is building toward terminal but hasn't
+    crossed the kill line yet, so instead of apoptosis we block the offending
+    call and inject a corrective "steer" message — a chance for the agent to
+    change course before it gets killed.
+
+    Only `check_loop` produces this today (loops are the one symptom an agent
+    can recover from on its own — re-reading the task and trying a different
+    tool breaks the cycle). Resource-burn symptoms (cost, wall-clock) and scope
+    violations are not steerable: you can't talk an agent out of money already
+    spent or a tool it must not touch.
+
+    Like `Terminal`, it's delivered through the framework adapter's block
+    primitive — but it does **not** flip `terminate_requested`; the session
+    continues.
+    """
+
+    symptom: SymptomType
+    reason: str
+    detail: dict[str, Any] = field(default_factory=dict)
+
+
+CheckResult = Healthy | Warning | Terminal | Steer
 
 # Shared sentinel — `is HEALTHY` works because Healthy is frozen + has no
 # state, and we never construct another instance from inside this module.
@@ -102,33 +125,77 @@ def loop_peak(state: WatcherState) -> tuple[str | None, int]:
 
 
 def check_loop(state: WatcherState, policy: Policy) -> CheckResult:
-    """Loop detection: trigger if any signature appears ≥ `max_loop_repeats`
-    times in the current ring-buffer window.
+    """Loop detection with a graduated response: **steer** before you kill.
+
+    Two thresholds, two intents:
+
+      * **Terminal (kill)** keys off the *most-frequent* signature in the
+        window (`loop_peak`) reaching `max_loop_repeats`. Peak-based so an
+        agent alternating between two looping branches still dies — no single
+        signature owns the window, but the worst offender crosses the line.
+
+      * **Steer (nudge)** keys off the *current call's* signature reaching
+        `loop_steer_repeats` (and below the kill line). Current-signature —
+        **not** peak — is essential: a steer blocks the call and is meant to
+        be recoverable, so the moment the agent obeys and switches to a
+        different call, that new call's count is 1 and it sails through. If
+        steer keyed off the peak, the just-evicted-over-a-full-window losing
+        signature would keep tripping and we'd block the agent's *corrective*
+        call too — defeating the whole point.
+
+    Terminal takes precedence (checked first). `loop_steer_repeats=None`
+    disables steering entirely, restoring the original kill-only behaviour.
 
     The ring buffer (`state.loop_signatures`) is updated on every tool call
     in `WatcherState.record_tool_call`; its maxlen comes from
     `policy.thresholds.loop_window_actions` (wired in `WatcherState.__post_init__`).
-
-    Counts the *most frequent* signature, not the latest — an agent
-    alternating between two looping branches still trips this even though
-    no single signature occupies the whole window.
     """
     if not state.loop_signatures:
         return HEALTHY
-    threshold = policy.thresholds.max_loop_repeats
-    most_common_sig, count = loop_peak(state)
-    if count >= threshold:
+    t = policy.thresholds
+    max_repeats = t.max_loop_repeats
+    window = len(state.loop_signatures)
+    # One pass over the window powers both verdicts (window ≤ 40 even on the
+    # permissive policy — cheap on the hot path).
+    counts = Counter(state.loop_signatures)
+    most_common_sig, peak = counts.most_common(1)[0]
+    if peak >= max_repeats:
         return Terminal(
             symptom=SymptomType.LOOP,
             reason=(
-                f"signature {most_common_sig!r} repeated {count}x in last "
-                f"{len(state.loop_signatures)} actions (cap {threshold})"
+                f"signature {most_common_sig!r} repeated {peak}x in last "
+                f"{window} actions (cap {max_repeats})"
             ),
             detail={
                 "signature": most_common_sig,
-                "count": count,
-                "window_size": len(state.loop_signatures),
-                "max_loop_repeats": threshold,
+                "count": peak,
+                "window_size": window,
+                "max_loop_repeats": max_repeats,
+            },
+        )
+
+    steer = t.loop_steer_repeats
+    if steer is None:
+        return HEALTHY
+    current_sig = state.loop_signatures[-1]
+    current_count = counts[current_sig]
+    # current_count <= peak < max_repeats, so the upper bound holds for free.
+    if current_count >= steer:
+        remaining = max_repeats - current_count
+        return Steer(
+            symptom=SymptomType.LOOP,
+            reason=(
+                f"signature {current_sig!r} repeated {current_count}x in last "
+                f"{window} actions (steer at {steer}, kill at {max_repeats}; "
+                f"{remaining} more identical repeat(s) → termination)"
+            ),
+            detail={
+                "signature": current_sig,
+                "count": current_count,
+                "window_size": window,
+                "loop_steer_repeats": steer,
+                "max_loop_repeats": max_repeats,
+                "remaining_before_kill": remaining,
             },
         )
     return HEALTHY
@@ -224,7 +291,7 @@ def check_tool_scope(tool_name: str, policy: Policy) -> CheckResult:
 # --- orchestrator ---------------------------------------------------------
 
 
-def run_all(state: WatcherState, policy: Policy) -> list[Terminal | Warning]:
+def run_all(state: WatcherState, policy: Policy) -> list[Terminal | Warning | Steer]:
     """Run every state-only check; return all non-Healthy verdicts.
 
     `check_tool_scope` is excluded — it needs the inbound tool name, which
@@ -232,9 +299,10 @@ def run_all(state: WatcherState, policy: Policy) -> list[Terminal | Warning]:
     `check_tool_scope` directly and then calls `run_all` for everything else.
 
     The caller (M2.3 apoptosis wiring) treats the first `Terminal` in the
-    returned list as the kill trigger; `Warning`s are logged but don't kill.
+    returned list as the kill trigger; a `Steer` is delivered as a corrective
+    block but does not kill; `Warning`s are logged but don't act.
     """
-    out: list[Terminal | Warning] = []
+    out: list[Terminal | Warning | Steer] = []
     for fn in (check_loop, check_cost_runaway, check_wall_clock):
         result = fn(state, policy)
         if not isinstance(result, Healthy):
@@ -246,11 +314,17 @@ def run_all(state: WatcherState, policy: Policy) -> list[Terminal | Warning]:
 
 
 def apply_grants(
-    results: list[Terminal | Warning],
+    results: list[Terminal | Warning | Steer],
     grants: list[dict[str, Any]],
-) -> list[Terminal | Warning]:
-    """Demote Terminal verdicts into Warnings when an active grant covers
-    the symptom.
+) -> list[Terminal | Warning | Steer]:
+    """Demote Terminal *and* Steer verdicts into Warnings when an active grant
+    covers the symptom.
+
+    A loop grant means "this repetition is intentional" (e.g. a polling
+    agent). It must suppress not just the kill but the *steer* too — otherwise
+    a granted, legitimately-looping agent would have its repeated calls blocked
+    and be nagged with corrective messages on every tick. So both the hard kill
+    and the soft nudge are demoted to an audit-only Warning when granted.
 
     Pure function — no I/O, no state mutation. Inputs:
       * `results` from `run_all()` or `check_tool_scope()`.
@@ -286,9 +360,9 @@ def apply_grants(
         for s in g.get("symptoms", []):
             by_symptom.setdefault(str(s), g)
 
-    out: list[Terminal | Warning] = []
+    out: list[Terminal | Warning | Steer] = []
     for r in results:
-        if isinstance(r, Terminal) and r.symptom.value in by_symptom:
+        if isinstance(r, (Terminal, Steer)) and r.symptom.value in by_symptom:
             grant = by_symptom[r.symptom.value]
             out.append(
                 Warning(

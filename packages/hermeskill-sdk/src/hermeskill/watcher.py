@@ -152,6 +152,13 @@ class WatcherState:
     # live vitals snapshot reports.
     tool_call_count: int = 0
 
+    # Lifetime count of loop-steer interventions — bumped each time a Steer
+    # verdict is acted on (the framework adapter blocks the call + injects a
+    # corrective message). Surfaced in the live vitals snapshot so `hermeskill
+    # monitor` can show how many times the agent was nudged before it either
+    # recovered or crossed into apoptosis.
+    steer_count: int = 0
+
     # Active grants (M5 populates from heartbeat response).
     grants: list[dict[str, Any]] = field(default_factory=list)
 

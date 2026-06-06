@@ -33,6 +33,19 @@ Effect when Hermeskill fires:
   4. When the agent's loop ends naturally, Hermes fires ``on_session_end``
      and we POST the death certificate
 
+Steer path (soft intervention, same block primitive)
+-----------------------------------------------------
+
+Loop detection is graduated. Before a loop crosses the kill threshold, a
+``Steer`` verdict (see ``hermeskill.checks``) is returned from
+``bridge.on_pre_tool_call`` *without* setting ``terminate_requested``. The
+plugin turns it into the same ``{"action": "block", ...}`` directive — but the
+message asks the agent to change approach rather than to stop, so the one
+looping call is refused while the session continues. If the agent keeps
+repeating the identical call, the loop count climbs to ``max_loop_repeats`` and
+the kill path above fires. ``state.steer_count`` tracks how many nudges landed
+(surfaced in the live vitals snapshot).
+
 Why block-only and not ``ctx.register_tool(override=True)`` with SystemExit:
   - block-directive is the documented and tested Hermes path; tool_override
     in v0.14 means "swap a tool's implementation" (per PR #26759) and would
@@ -73,6 +86,7 @@ from hermeskill.apoptosis import (
     build_kill_event_payload,
 )
 from hermeskill.certificate import render_certificate, save_certificate
+from hermeskill.checks import Steer
 from hermeskill.client import HermeskillClient, TransportError
 from hermeskill.policies import resolve_policy
 from hermeskill.types import Policy
@@ -323,14 +337,24 @@ class HermeskillPlugin:
             )
 
         # Run checks (loop / cost / wall-clock / scope). If any fires Terminal,
-        # state.terminate_requested flips inside bridge.on_pre_tool_call.
-        on_pre_tool_call(self._state, tool_name, args)
+        # state.terminate_requested flips inside bridge.on_pre_tool_call; a
+        # Steer is returned in the verdict list without flipping the flag.
+        verdicts = on_pre_tool_call(self._state, tool_name, args)
         self._write_vitals()
 
+        # Kill takes precedence over a steer (a Terminal and a Steer are
+        # mutually exclusive for the loop check, but check the flag first so
+        # the directive shape is identical to the already-armed fast path).
         if self._state.terminate_requested:
             return self._block_directive(
                 self._state.terminate_reason or "hermeskill termination"
             )
+
+        # Soft intervention: block this one repeated call and inject a
+        # corrective nudge, but let the session continue.
+        steer = next((v for v in verdicts if isinstance(v, Steer)), None)
+        if steer is not None:
+            return self._steer_directive(steer)
 
         return None
 
@@ -427,6 +451,33 @@ class HermeskillPlugin:
                 f"hermeskill apoptosis: this agent has been terminated by the "
                 f"supervisor. Reason: {reason}. Do not retry; do not call "
                 "other tools; end the session cleanly."
+            ),
+        }
+
+    def _steer_directive(self, steer: Steer) -> dict[str, str]:
+        """Build the Hermes block directive for a loop **steer**.
+
+        Same transport as the kill block (Hermes surfaces ``message`` as the
+        tool's error result), but the intent is the opposite: we want the agent
+        to *recover*, not stop. The wording blocks the one looping call and
+        tells the agent to change approach. Crucially we do NOT set
+        ``terminate_requested`` — the session continues, and if the agent keeps
+        repeating the identical call the loop count climbs to the kill
+        threshold and apoptosis fires on its own.
+        """
+        remaining = steer.detail.get("remaining_before_kill")
+        tail = (
+            f" {remaining} more identical repeat(s) will trigger termination."
+            if isinstance(remaining, int)
+            else ""
+        )
+        return {
+            "action": "block",
+            "message": (
+                f"hermeskill loop-steer: this looks like a loop — {steer.reason}. "
+                "This repeated call was blocked. Change approach: re-read the "
+                "task, try a different tool or different arguments, or explain "
+                f"what is blocking you. Do NOT repeat the identical call.{tail}"
             ),
         }
 

@@ -34,6 +34,7 @@ from typing import Any
 from uuid import UUID
 
 from hermeskill.checks import (
+    Steer,
     Terminal,
     Warning,
     apply_grants,
@@ -53,8 +54,8 @@ _CHECK_FAILURE_LOGGED: set[UUID] = set()
 
 def _run_checks_failopen(
     state: WatcherState,
-    seed: list[Terminal | Warning] | None = None,
-) -> list[Terminal | Warning]:
+    seed: list[Terminal | Warning | Steer] | None = None,
+) -> list[Terminal | Warning | Steer]:
     """Run `run_all` + `apply_grants`, but never raise.
 
     The module contract is that these functions "do not raise"; this enforces
@@ -66,7 +67,7 @@ def _run_checks_failopen(
     ``seed`` carries verdicts already computed by the caller (e.g. a tool-scope
     Terminal) so they survive even if `run_all` itself throws.
     """
-    verdicts: list[Terminal | Warning] = list(seed) if seed else []
+    verdicts: list[Terminal | Warning | Steer] = list(seed) if seed else []
     try:
         verdicts.extend(run_all(state, state.policy))
     except Exception:
@@ -94,7 +95,7 @@ def on_pre_tool_call(
     state: WatcherState,
     tool_name: str,
     args: Any,
-) -> list[Terminal | Warning]:
+) -> list[Terminal | Warning | Steer]:
     """Pre-tool boundary checkpoint.
 
     1. Tool-scope check — fires BEFORE the tool runs (scope violation is
@@ -103,10 +104,11 @@ def on_pre_tool_call(
     3. Run state checks (loop, cost, wall-clock).
 
     Returns all non-Healthy verdicts (with grants applied). An empty list
-    means all checks passed. The caller (plugin.py) translates any Terminal
-    into Hermes' block directive.
+    means all checks passed. The caller (plugin.py) translates a Terminal into
+    Hermes' block directive (kill) and a Steer into a corrective block (nudge,
+    no kill).
     """
-    verdicts: list[Terminal | Warning] = []
+    verdicts: list[Terminal | Warning | Steer] = []
 
     # Scope check runs first — before recording, so a scope violation
     # doesn't pollute the loop ring buffer with tools we shouldn't be
@@ -123,7 +125,12 @@ def on_pre_tool_call(
     all_verdicts = _run_checks_failopen(state, seed=verdicts)
 
     for v in all_verdicts:
-        severity = "terminal" if isinstance(v, Terminal) else "warning"
+        if isinstance(v, Terminal):
+            severity = "terminal"
+        elif isinstance(v, Steer):
+            severity = "steer"
+        else:
+            severity = "warning"
         try:
             state.record_symptom(
                 symptom=v.symptom,
@@ -142,8 +149,18 @@ def on_pre_tool_call(
                 v.symptom.value,
                 v.reason,
             )
+        elif isinstance(v, Steer):
+            # Soft intervention: count it, but do NOT terminate. The plugin
+            # turns this into a corrective block directive; the session lives.
+            state.steer_count += 1
+            logger.info(
+                "hermeskill: agent %s steered (%s): %s",
+                state.agent_id,
+                v.symptom.value,
+                v.reason,
+            )
 
-    return [v for v in all_verdicts if isinstance(v, Terminal | Warning)]
+    return all_verdicts
 
 
 def on_post_tool_call(

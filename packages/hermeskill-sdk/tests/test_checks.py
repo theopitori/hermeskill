@@ -22,8 +22,10 @@ from hermeskill.checks import (
     HEALTHY,
     CheckResult,
     Healthy,
+    Steer,
     Terminal,
     Warning,
+    apply_grants,
     check_cost_runaway,
     check_loop,
     check_tool_scope,
@@ -56,6 +58,10 @@ def _policy_with(**threshold_overrides: object) -> Policy:
     """
     base = resolve_policy("coding-default")
     t = base.thresholds.model_dump()
+    # Steering is off by default in these helpers so the legacy binary
+    # (Healthy/Terminal) tests stay valid as pure-kill tests. Tests that
+    # exercise the steer band set `loop_steer_repeats=` explicitly.
+    t["loop_steer_repeats"] = None
     t.update(threshold_overrides)
     return base.model_copy(update={"thresholds": PolicyThresholds(**t)})
 
@@ -210,6 +216,136 @@ def test_loop_window_size_in_detail_reflects_actual_buffer_len() -> None:
     r = check_loop(s, p)
     assert isinstance(r, Terminal)
     assert r.detail["window_size"] == 3
+
+
+# --- check_loop: steer band ----------------------------------------------
+
+
+def test_loop_steer_disabled_by_default_in_helper() -> None:
+    """`_policy_with` nulls steering, so the loop check is pure kill-or-heal:
+    no Steer ever appears unless a test opts in. Guards the helper contract."""
+    p = _policy_with(max_loop_repeats=5, loop_window_actions=20)
+    assert p.thresholds.loop_steer_repeats is None
+    s = _state(p)
+    for _ in range(4):  # in [3,5) — would steer if steering were on
+        s.record_tool_call("read_file", {"path": "a.txt"})
+    assert check_loop(s, p) is HEALTHY
+
+
+def test_loop_steer_fires_in_band() -> None:
+    """At the steer threshold (below the kill cap) the current signature
+    produces a Steer, not a Terminal."""
+    p = _policy_with(
+        max_loop_repeats=5, loop_steer_repeats=3, loop_window_actions=20
+    )
+    s = _state(p)
+    for _ in range(3):
+        s.record_tool_call("read_file", {"path": "a.txt"})
+    r = check_loop(s, p)
+    assert isinstance(r, Steer)
+    assert r.symptom == SymptomType.LOOP
+    assert r.detail["count"] == 3
+    assert r.detail["loop_steer_repeats"] == 3
+    assert r.detail["max_loop_repeats"] == 5
+    assert r.detail["remaining_before_kill"] == 2
+    assert "read_file" in r.detail["signature"]
+
+
+def test_loop_healthy_below_steer_threshold() -> None:
+    p = _policy_with(
+        max_loop_repeats=5, loop_steer_repeats=3, loop_window_actions=20
+    )
+    s = _state(p)
+    s.record_tool_call("read_file", {"path": "a.txt"})
+    s.record_tool_call("read_file", {"path": "a.txt"})  # count 2 < steer 3
+    assert check_loop(s, p) is HEALTHY
+
+
+def test_loop_steer_escalates_to_terminal_at_cap() -> None:
+    """Repeating the identical call through the band lands on a Terminal once
+    the peak reaches the kill cap."""
+    p = _policy_with(
+        max_loop_repeats=5, loop_steer_repeats=3, loop_window_actions=20
+    )
+    s = _state(p)
+    verdicts: list[CheckResult] = []
+    for _ in range(5):
+        s.record_tool_call("read_file", {"path": "a.txt"})
+        verdicts.append(check_loop(s, p))
+    # counts 1,2 → Healthy; 3,4 → Steer; 5 → Terminal.
+    assert verdicts[0] is HEALTHY
+    assert verdicts[1] is HEALTHY
+    assert isinstance(verdicts[2], Steer)
+    assert isinstance(verdicts[3], Steer)
+    assert isinstance(verdicts[4], Terminal)
+
+
+def test_loop_steer_keys_on_current_sig_not_peak() -> None:
+    """The crux of the recoverable-steer design: once the agent obeys and
+    switches to a *different* call, that call's count is 1 → it sails through,
+    even though the just-abandoned signature still dominates the window.
+
+    With peak-based steering this would (wrongly) keep blocking the corrective
+    call until the loser aged out over a whole window."""
+    p = _policy_with(
+        max_loop_repeats=5, loop_steer_repeats=3, loop_window_actions=20
+    )
+    s = _state(p)
+    for _ in range(3):  # A x3 -> steers
+        s.record_tool_call("read_file", {"path": "a.txt"})
+    assert isinstance(check_loop(s, p), Steer)
+    # Agent changes approach: a single different call. Buffer is [A,A,A,B];
+    # peak is still A=3 (< kill cap 5), but current sig B=1 → Healthy.
+    s.record_tool_call("write_file", {"path": "b.txt"})
+    assert check_loop(s, p) is HEALTHY
+
+
+def test_loop_steer_none_is_pure_kill() -> None:
+    """`loop_steer_repeats=None` restores the original binary behaviour —
+    no Steer ever, Terminal only at the cap."""
+    p = _policy_with(
+        max_loop_repeats=3, loop_steer_repeats=None, loop_window_actions=20
+    )
+    s = _state(p)
+    s.record_tool_call("x", {})
+    s.record_tool_call("x", {})
+    assert check_loop(s, p) is HEALTHY  # count 2, no steer band
+    s.record_tool_call("x", {})
+    assert isinstance(check_loop(s, p), Terminal)  # count 3 == cap
+
+
+def test_loop_steer_below_kill_validated() -> None:
+    """A steer threshold at/above the kill cap is a misconfiguration (empty
+    band) and is rejected at policy-construction time."""
+    with pytest.raises(ValueError, match="loop_steer_repeats"):
+        PolicyThresholds(max_loop_repeats=5, loop_steer_repeats=5)
+    with pytest.raises(ValueError, match="loop_steer_repeats"):
+        PolicyThresholds(max_loop_repeats=5, loop_steer_repeats=6)
+
+
+def test_run_all_includes_steer() -> None:
+    p = _policy_with(
+        max_loop_repeats=5, loop_steer_repeats=3, loop_window_actions=20
+    )
+    s = _state(p)
+    for _ in range(3):
+        s.record_tool_call("read_file", {"path": "a.txt"})
+    results = run_all(s, p)
+    assert len(results) == 1
+    assert isinstance(results[0], Steer)
+    assert results[0].symptom == SymptomType.LOOP
+
+
+def test_grant_suppresses_steer() -> None:
+    """A loop grant must demote a Steer to a Warning — a legitimately-looping
+    granted agent should not be blocked/nagged either."""
+    steer = Steer(symptom=SymptomType.LOOP, reason="looping", detail={"count": 3})
+    grants = [{"id": "g1", "symptoms": ["loop"], "reason": "intentional poll"}]
+    out = apply_grants([steer], grants)
+    assert len(out) == 1
+    assert isinstance(out[0], Warning)
+    assert out[0].symptom == SymptomType.LOOP
+    assert out[0].detail["grant_id"] == "g1"
 
 
 # --- check_cost_runaway --------------------------------------------------
